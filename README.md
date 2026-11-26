@@ -80,7 +80,7 @@ GEMINI_API_KEY=... npm start   # http://localhost:8080 ; omit the key to see the
 npm run check        # lint + tests with coverage gate
 ```
 
-If the page shows the rule-based fallback while AI is ticked, the banner and the server log print the reason and Google's error. Run `npm run diagnose` (with `GEMINI_API_KEY` set) to see the raw failure; set `GEMINI_MODEL` if the model name is rejected.
+If the page shows the rule-based fallback while AI is ticked, the banner and the server log print the reason and Google's error. Run `npm run diagnose` (with `GEMINI_API_KEY` set) to see the raw failure, or `npm run diagnose:ladder` to send five requests of rising complexity (plain, thinking off, JSON mode, schema, schema with thinking off) and see which one is slow; set `GEMINI_MODEL` if the model name is rejected.
 
 Get a free Gemini key at https://aistudio.google.com/apikey. Node 20 or newer.
 
