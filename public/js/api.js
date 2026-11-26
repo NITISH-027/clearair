@@ -1,7 +1,7 @@
 // Browser-side calls to the ClearAir server. Every call has a timeout and
 // turns failures into Error objects with a readable message.
 
-const TIMEOUT_MS = 40000; // the server may retry the AI service with backoff
+const TIMEOUT_MS = 70000; // the server may retry the AI service with backoff
 
 async function request(url, init = {}) {
   let response;

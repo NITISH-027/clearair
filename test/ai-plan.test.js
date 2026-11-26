@@ -94,9 +94,9 @@ test('generateAiPlan parses a live-schema Gemini response and sends the structur
   const f = fakeFetch([['generateContent', geminiReply()]]);
   const result = await generateAiPlan({ fetchImpl: f, env, facts, notes: 'walk the dog', sleep: noSleep });
   assert.equal(result.steps.length, 3);
-  assert.equal(result.model, 'gemini-2.5-flash');
+  assert.equal(result.model, 'gemini-3.8-flash');
   const call = f.calls[0];
-  assert.match(call.url, /models\/gemini-2\.5-flash:generateContent$/);
+  assert.match(call.url, /models\/gemini-3\.8-flash:generateContent$/);
   assert.ok(!call.url.includes('test-key'), 'key must stay out of the URL');
   assert.equal(call.init.headers['x-goog-api-key'], 'test-key-123');
   const body = JSON.parse(call.init.body);
@@ -142,7 +142,7 @@ test('generateAiPlan reports timeouts and retries them', async () => {
 });
 
 test('generateAiPlan does not retry auth or bad-request errors', async () => {
-  for (const status of [400, 401, 403, 404]) {
+  for (const status of [400, 401, 403]) {
     const f = fakeFetch([['generateContent', json({}, false, status)]]);
     await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', sleep: noSleep }), (e) => e.code === 'api_error');
     assert.equal(f.calls.length, 1, `status ${status}`);
@@ -187,4 +187,40 @@ test('an HTTP error with a non-JSON body still reports the status', async () => 
     generateAiPlan({ fetchImpl, env: { GEMINI_API_KEY: 'k' }, facts: {}, notes: '', sleep: async () => {} }),
     (err) => err.detail === 'HTTP 403',
   );
+});
+
+test('a 404 on the chosen model tries the fallback models in order', async () => {
+  const tried = [];
+  const fetchImpl = async (url) => {
+    tried.push(url.match(/models\/([^:]+):/)[1]);
+    if (tried.length < 3) return { ok: false, status: 404, json: async () => ({ error: { message: 'gone' } }) };
+    return geminiReply();
+  };
+  const result = await generateAiPlan({ fetchImpl, env: { GEMINI_API_KEY: 'k' }, facts: {}, notes: '', sleep: async () => {} });
+  assert.deepEqual(tried, ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite']);
+  assert.equal(result.model, 'gemini-2.5-flash-lite');
+});
+
+test('a 404 on every model ends as api_error with the last detail', async () => {
+  const fetchImpl = async () => ({ ok: false, status: 404, json: async () => ({ error: { message: 'gone' } }) });
+  await assert.rejects(
+    generateAiPlan({ fetchImpl, env: { GEMINI_API_KEY: 'k', GEMINI_MODEL: 'gemini-flash-latest' }, facts: {}, notes: '', sleep: async () => {} }),
+    (err) => err.code === 'api_error' && err.detail === 'HTTP 404: gone',
+  );
+});
+
+test('a non-404 error does not move on to another model', async () => {
+  let calls = 0;
+  const fetchImpl = async () => { calls += 1; return { ok: false, status: 403, json: async () => ({}) }; };
+  await assert.rejects(generateAiPlan({ fetchImpl, env: { GEMINI_API_KEY: 'k' }, facts: {}, notes: '', sleep: async () => {} }));
+  assert.equal(calls, 1);
+});
+
+test('GEMINI_THINKING_BUDGET is sent only when it is a plain integer', async () => {
+  for (const [value, expected] of [['0', 0], ['1024', 1024], ['abc', undefined], ['', undefined]]) {
+    const f = fakeFetch([['generateContent', geminiReply()]]);
+    await generateAiPlan({ fetchImpl: f, env: { ...env, GEMINI_THINKING_BUDGET: value }, facts, notes: '', sleep: noSleep });
+    const cfg = JSON.parse(f.calls[0].init.body).generationConfig;
+    assert.equal(cfg.thinkingConfig?.thinkingBudget, expected, value);
+  }
 });

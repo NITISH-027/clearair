@@ -35,9 +35,9 @@ flowchart LR
 
 ## Gemini pipeline (`server/ai-plan.js`)
 
-- Request: REST `generateContent` with `responseMimeType: application/json` and a `responseSchema`. The key is sent in the `x-goog-api-key` header, never in a URL or log. Model defaults to `gemini-2.5-flash`; set `GEMINI_MODEL` to change it.
+- Request: REST `generateContent` with `responseMimeType: application/json` and a `responseSchema`. The key is sent in the `x-goog-api-key` header, never in a URL or log. Model defaults to `gemini-3.8-flash` (the model Google's API named when it retired `gemini-2.5-flash` for new users); set `GEMINI_MODEL` to change it. If the chosen model answers HTTP 404, the pipeline tries `gemini-flash-latest` then `gemini-2.5-flash-lite` before falling back to the rule-based plan. Other errors are not retried on another model. If replies are slow or time out on a thinking model, set `GEMINI_THINKING_BUDGET` (for example `0` or `1024`) to cap hidden reasoning tokens; it is only sent when set.
 - Output is parsed and **strictly validated** (types, lengths, step count). Recoverable malformed output (code fences, trailing text) is repaired once; anything else is rejected.
-- Reliability: per-attempt timeout, 3 attempts with exponential backoff and jitter on 429/5xx/network errors.
+- Reliability: per-attempt timeout (30 s), 2 attempts with exponential backoff and jitter on 429/5xx/network errors.
 - Fallback: only if the key is missing, the user did not opt in, the rate limit is hit, or the call fails (`timeout`, `api_error`, `invalid_output`, `rate_limited`, `no_api_key`). The response carries `ai.source` (`gemini`, `fallback`, `off`) and a human label, and the UI shows a banner saying which plan you are reading.
 - Prompt-injection defense: the model only receives validated facts (AQI, ticked groups, catalogue step titles). City is reduced to a letters-only label. Free-text notes (200 chars max) are normalised, scanned with a word-window detector (no backtracking regex), dropped completely if they look like instructions, and otherwise placed between delimiters in a data-only section the system prompt tells the model to treat as untrusted. Model text is cleaned of markup before display and rendered with `textContent`.
 

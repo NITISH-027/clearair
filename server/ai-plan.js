@@ -5,9 +5,11 @@ import { UpstreamError, fetchJson } from './upstream.js';
 import { withRetry } from './retry.js';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-export const DEFAULT_MODEL = 'gemini-2.5-flash';
-export const AI_TIMEOUT_MS = 12_000;
-export const AI_ATTEMPTS = 3;
+export const DEFAULT_MODEL = 'gemini-3.8-flash';
+/** Tried in order, only when the chosen model answers 404 (retired or not open to this key). */
+export const FALLBACK_MODELS = Object.freeze(['gemini-flash-latest', 'gemini-2.5-flash-lite']);
+export const AI_TIMEOUT_MS = 30_000;
+export const AI_ATTEMPTS = 2;
 
 export const STEP_WHEN = Object.freeze(['morning', 'daytime', 'evening', 'anytime']);
 export const STEP_CATEGORY = Object.freeze(['routine', 'indoor', 'swap', 'care']);
@@ -195,8 +197,8 @@ export function aiCacheKey(model, facts, notes) {
  * output with exponential backoff, then throws an AiError.
  */
 export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, random, timeoutMs = AI_TIMEOUT_MS, attempts = AI_ATTEMPTS }) {
-  const model = env.GEMINI_MODEL || DEFAULT_MODEL;
-  if (!/^[a-z0-9.-]{3,40}$/i.test(model)) throw new AiError('api_error');
+  const primary = env.GEMINI_MODEL || DEFAULT_MODEL;
+  if (!MODEL_NAME.test(primary)) throw new AiError('api_error', 'invalid model name');
   const { system, user } = buildPrompt(facts, notes);
   const body = JSON.stringify({
     systemInstruction: { parts: [{ text: system }] },
@@ -206,11 +208,25 @@ export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, rand
       maxOutputTokens: 4096,
       responseMimeType: 'application/json',
       responseSchema: RESPONSE_SCHEMA,
+      ...thinkingConfig(env),
     },
   });
   const init = { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY }, body };
 
-  try {
+  const models = [primary, ...FALLBACK_MODELS.filter((m) => m !== primary)];
+  let lastError;
+  for (const model of models) {
+    try {
+      return await callModel(model);
+    } catch (err) {
+      lastError = err;
+      const modelMissing = err instanceof UpstreamError && err.kind === 'status' && err.status === 404;
+      if (!modelMissing) break;
+    }
+  }
+  throw toAiError(lastError);
+
+  async function callModel(model) {
     const plan = await withRetry(
       async () => {
         const data = await fetchJson(fetchImpl, `${GEMINI_BASE}/${model}:generateContent`, init, timeoutMs);
@@ -226,13 +242,27 @@ export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, rand
       },
     );
     return { ...plan, model };
-  } catch (err) {
-    // Whatever went wrong, the caller only ever sees an AiError so the rule-based plan can take over.
-    if (err instanceof AiError) throw err;
-    if (err instanceof UpstreamError) {
-      const detail = err.kind === 'status' ? `HTTP ${err.status}${err.detail ? `: ${err.detail}` : ''}` : err.kind;
-      throw new AiError(err.kind === 'timeout' ? 'timeout' : 'api_error', detail);
-    }
-    throw new AiError('api_error', 'unexpected error');
   }
+}
+
+/**
+ * Optional GEMINI_THINKING_BUDGET (integer, 0 to 24576) caps the model's hidden reasoning tokens,
+ * which is the usual cause of slow replies on "thinking" models. Omitted unless set.
+ */
+function thinkingConfig(env) {
+  const raw = env.GEMINI_THINKING_BUDGET;
+  if (raw === undefined || raw === '' || !/^\d{1,5}$/.test(raw)) return {};
+  return { thinkingConfig: { thinkingBudget: Number(raw) } };
+}
+
+const MODEL_NAME = /^[a-z0-9.-]{3,40}$/i;
+
+/** Whatever went wrong, the caller only ever sees an AiError so the rule-based plan can take over. */
+function toAiError(err) {
+  if (err instanceof AiError) return err;
+  if (err instanceof UpstreamError) {
+    const detail = err.kind === 'status' ? `HTTP ${err.status}${err.detail ? `: ${err.detail}` : ''}` : err.kind;
+    return new AiError(err.kind === 'timeout' ? 'timeout' : 'api_error', detail);
+  }
+  return new AiError('api_error', 'unexpected error');
 }

@@ -63,7 +63,7 @@ export const geminiReply = (plan = goodAiPlan) =>
   json({
     candidates: [{ content: { role: 'model', parts: [{ text: typeof plan === 'string' ? plan : JSON.stringify(plan) }] }, finishReason: 'STOP', index: 0 }],
     usageMetadata: { promptTokenCount: 500, candidatesTokenCount: 300, totalTokenCount: 800 },
-    modelVersion: 'gemini-2.5-flash',
+    modelVersion: 'gemini-3.8-flash',
   });
 
 export const profileBody = (over = {}) => ({
