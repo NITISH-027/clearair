@@ -14,7 +14,7 @@ flowchart LR
   V --> P[shared/planner.js<br/>rules + exposure.js model]
   A --> P
   P --> G{useAi and key and under rate limit?}
-  G -->|yes| M[server/ai-plan.js<br/>Gemini, responseSchema,<br/>timeout, 3 tries with backoff<br/>15 min TTL cache]
+  G -->|yes| M[server/ai-plan.js<br/>Gemini, responseSchema,<br/>30 s timeout, 85 s budget,<br/>retry + model fallback chain<br/>15 min TTL cache]
   G -->|no| F[Labelled rule-based plan]
   M -->|invalid, timeout, API error| F
   M -->|valid JSON| R[Response: air + plan + ai]
@@ -36,10 +36,10 @@ flowchart LR
 ## Gemini pipeline (`server/ai-plan.js`)
 
 - Request: REST `generateContent` with `responseMimeType: application/json` and a `responseSchema`. The key is sent in the `x-goog-api-key` header, never in a URL or log. Model defaults to `gemini-3.5-flash-lite`; set `GEMINI_MODEL` to change it (`gemini-2.5-flash` and `gemini-2.5-flash-lite` are closed to new users). Schema mode comes first. If Google rejects the schema request (400) or is overloaded (5xx) after one retry, the same model is asked in JSON-only mode (schema described in the prompt) and the reply is validated by our own strict validator. If the model times out, answers 404, 429 or 5xx in both modes, the pipeline tries `gemini-3.8-flash` then `gemini-flash-latest` before falling back to the rule-based plan. Auth and bad-request errors (400, 401, 403) do not switch models (a timeout does: a hung model is skipped without a second wait).
-- Output is parsed and **strictly validated** (types, lengths, step count). Recoverable malformed output (code fences, trailing text) is repaired once; anything else is rejected.
+- Output is parsed and **strictly validated** (types, lengths, step count). Malformed output is repaired where safe (code fences, text around the JSON, trailing commas); anything that still fails validation counts as `invalid_output` and is retried, then falls back.
 - Reliability: per-attempt timeout (30 s), an 85 s budget across all models, one retry per model on 429/5xx/network errors with exponential backoff and jitter; a timeout moves straight to the next model.
-- Fallback: only if the key is missing, the user did not opt in, the rate limit is hit, or the call fails (`timeout`, `api_error`, `invalid_output`, `rate_limited`, `no_api_key`). The response carries `ai.source` (`gemini`, `fallback`, `off`) and a human label, and the UI shows a banner saying which plan you are reading.
-- Prompt-injection defense: the model only receives validated facts (AQI, ticked groups, catalogue step titles). City is reduced to a letters-only label. Free-text notes (200 chars max) are normalised, scanned with a word-window detector (no backtracking regex), dropped completely if they look like instructions, and otherwise placed between delimiters in a data-only section the system prompt tells the model to treat as untrusted. Model text is cleaned of markup before display and rendered with `textContent`.
+- Rule-based plan: shown (labelled) when the key is missing, the user did not opt in (`ai.source` is `off`), the Gemini rate limit is hit, or the call fails (`timeout`, `api_error`, `invalid_output`, `rate_limited`, `no_api_key`). The response carries `ai.source` (`gemini`, `fallback`, `off`) and a human label, and the UI shows a banner saying which plan you are reading.
+- Prompt-injection defense: the model only receives server-built facts (AQI and PM2.5, a forecast summary, ticked household groups, commute, home settings, the modelled exposure and the rule-based step titles), never raw request fields. The place name comes from the geocoder and is reduced to letters, digits and basic punctuation, 60 characters. Free-text notes (200 chars max) are normalised, scanned with a word-window detector (no backtracking regex), dropped completely if they look like instructions, and otherwise placed between delimiters in a data-only section the system prompt tells the model to treat as untrusted. Model text is cleaned of markup before display and rendered with `textContent`.
 
 ## Exposure model (`shared/exposure.js`)
 
@@ -57,11 +57,11 @@ C_in = ( P * a * C_out + S / V ) / ( a + k + CADR / V )
 
 `P` penetration 0.8, `a` air changes per hour (2.0 windows open, 0.5 closed), `k` deposition 0.2 /h, `CADR` purifier clean air delivery rate (default 200 m3/h, user adjustable 20 to 1000), `V` room volume 40 m3 (kitchen 15 m3), `S` source emission rate (ug/h). Kitchen emissions by fuel: biomass 46800, LPG 3000, induction/electric 600 ug/h; an exhaust fan raises kitchen air changes from 5 to 15 /h. Commute uses in-vehicle to ambient ratios (walk 1.0, cycle 1.0, two-wheeler 1.1, bus 0.9, metro 0.7, car 0.6) with mode-specific breathing rates. Masks apply a protection factor of 5, deliberately half the OSHA assigned factor of 10 for a well-fitted filtering facepiece, to allow for real-world leakage. Compared with the WHO 24-hour guideline of 15 ug/m3.
 
-Sources: US EPA Exposure Factors Handbook (2011) ch. 6 (inhalation rates); Klepeis et al. 2001, J Expo Anal Environ Epidemiol 11:231 (time spent indoors); Riley et al. 2002, Environ Sci Technol 36:200 (indoor particle dynamics); Wallace 1996, Indoor Air 6:50; Chen and Zhao 2011, Atmos Environ 45:275 (penetration and deposition); Kaur, Nieuwenhuijsen and Colvile 2007, Atmos Environ 41:4781 (commuter exposure); Smith et al. 2014, Annu Rev Public Health 35:185 (household fuel); OSHA 29 CFR 1910.134; WHO Global Air Quality Guidelines 2021. The same formulas appear in the in-app "How the numbers are calculated" panel and tooltips.
+Sources: US EPA Exposure Factors Handbook (2011) ch. 6 (inhalation rates); Klepeis et al. 2001, J Expo Anal Environ Epidemiol 11:231 (time spent indoors); Riley et al. 2002, Environ Sci Technol 36:200 (indoor particle dynamics); Wallace 1996, J Air Waste Manag Assoc 46:98 (indoor particle review); Chen and Zhao 2011, Atmos Environ 45:275 (penetration and deposition); Kaur, Nieuwenhuijsen and Colvile 2007, Atmos Environ 41:4781 (commuter exposure); Smith et al. 2014, Annu Rev Public Health 35:185 (household air pollution exposure and risk assessment, used for the order of magnitude of cooking-fuel emissions); OSHA 29 CFR 1910.134; WHO Global Air Quality Guidelines 2021. The same formulas appear in the in-app "How the numbers are calculated" panel and tooltips.
 
 **Honest limit:** the constants are assumptions chosen from the ranges in these sources. The model compares choices; it does not measure any person's exposure and is not medical advice.
 
-AQI uses the US EPA PM2.5 breakpoint table (2024 revision), clamped to 0 to 500; values above 500 are reported as 500+.
+AQI uses the US EPA PM2.5 breakpoint table (2024 revision). PM2.5 above the top breakpoint (325.4 ug/m3) is capped at AQI 500 and AQI inputs above 500 are capped at 500.
 
 ## API
 
@@ -69,16 +69,18 @@ AQI uses the US EPA PM2.5 breakpoint table (2024 revision), clamped to 0 to 500;
 | --- | --- |
 | `GET /healthz` | `{ok:true}` |
 | `GET /api/config` | `{aiEnabled}` |
-| `POST /api/plan` | Body `{city \| lat+lon \| aqi, profile, notes?, useAi?}` returns `{air, plan, ai}`. Validated, 16 KB cap, 20/min per client, Gemini 8/min per client. Errors are `{error:{code,message}}` with 400, 404, 413, 415, 429 or 502 |
+| `POST /api/plan` | Body `{city \| lat+lon \| aqi, profile, notes?, useAi?}` returns `{air, plan, ai}`. Validated, 8 KB body cap, 20/min per client, Gemini 8/min per client. Errors are `{error:{code,message}}` with 400, 403 (origin not allowed), 404, 405, 413, 415, 429 or 502 |
 
 ## Run locally
 
 ```bash
 npm install          # dev tools only; the app has no runtime dependencies
-cp .env.example .env # optional, then export the values you want
-GEMINI_API_KEY=... npm start   # http://localhost:8080 ; omit the key to see the labelled fallback
+export GEMINI_API_KEY=...   # macOS/Linux; omit to see the labelled rule-based plan
+npm start            # http://localhost:8080
 npm run check        # lint + tests with coverage gate
 ```
+
+Windows PowerShell: `$env:GEMINI_API_KEY = "..."` then `npm start`. The server reads environment variables only; `.env.example` lists the names (`GEMINI_API_KEY`, `GEMINI_MODEL`, `PORT`, `TRUST_PROXY`, `ALLOWED_ORIGINS`) and is not loaded automatically.
 
 If the page shows the rule-based fallback while AI is ticked, the banner and the server log print the reason and Google's error. Run `npm run diagnose` (with `GEMINI_API_KEY` set) to see the raw failure, or `npm run diagnose:ladder` to send three requests of rising complexity (plain, JSON mode, schema) and see which one is slow; set `GEMINI_MODEL` if the model name is rejected.
 
@@ -110,6 +112,6 @@ CI (`.github/workflows/ci.yml`) runs lint, `npm audit`, Semgrep, tests with cove
 
 ## Known limits
 
-- The Gemini path is tested against a fake `fetch` that returns the documented response shape (valid, malformed, timeout, error, injection cases). It has not been run against the live API from the build environment; check the model name with a real key.
+- The Gemini path is covered by tests with a fake `fetch` (valid, malformed, timeout, error, injection, model fallback). It was also run once live by the author on 26 Nov 2026: `gemini-3.5-flash-lite` and `gemini-flash-latest` returned valid plans, with replies taking from about 5 s to over a minute during a demand spike, and `gemini-3.8-flash` returned 503s and timeouts. Google retires and renames models often, so set `GEMINI_MODEL` if the default stops working. The Docker build and the GitHub Actions workflow were not run in the build environment.
 - Air data comes from Open-Meteo (modelled CAMS data, not a ground monitor). If it is down the API returns 502 with a clear message.
 - Rate limits and caches are in memory, per process.
