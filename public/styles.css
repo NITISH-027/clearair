@@ -61,16 +61,12 @@ h2 { margin: 0 0 1rem; font-size: 1.4rem; }
 h3 { margin: 0 0 0.6rem; font-size: 1.1rem; }
 .lede { max-width: 58ch; margin: 0; color: var(--muted); font-size: 1.08rem; }
 
-/* decorative clay art, pure CSS until image assets are added */
-.hero-art { position: relative; min-height: 260px; }
-.clay { position: absolute; border-radius: 50%; background: radial-gradient(circle at 30% 25%, #ffffff, #e3e8f1 70%); box-shadow: var(--raised); }
-.clay.big { width: 210px; height: 210px; right: 10%; top: 5%; }
-.clay.ring { width: 130px; height: 130px; right: 30%; top: 24%; border: 9px solid transparent;
-  background: linear-gradient(#f3f5f9, #f3f5f9) padding-box, linear-gradient(135deg, var(--pink), var(--orange)) border-box; }
-.clay.small { width: 62px; height: 62px; right: 4%; bottom: 8%; background: radial-gradient(circle at 30% 25%, #7ff0d6, var(--teal)); }
-.clay.tiny { width: 34px; height: 34px; left: 12%; bottom: 14%; background: radial-gradient(circle at 30% 25%, #ffd08a, var(--orange)); }
-.clay.capsule { width: 90px; height: 160px; border-radius: 45px; left: 6%; top: 12%; }
-.clay.capsule::after { content: ""; position: absolute; left: 50%; top: 14px; width: 40px; height: 40px; margin-left: -20px; border-radius: 50%; background: linear-gradient(135deg, var(--teal), #8ae9d2); box-shadow: inset 2px 2px 5px rgba(0,0,0,0.12); }
+/* decorative clay art (local WebP, hidden from assistive tech with empty alt) */
+.hero-art { display: flex; justify-content: center; }
+.hero-art img { width: 100%; max-width: 440px; height: auto; filter: drop-shadow(0 18px 22px rgba(120, 132, 160, 0.35)); }
+.fs-art { margin: -12px 0 -12px auto; width: 60px; height: auto; flex: none; filter: drop-shadow(0 6px 8px rgba(120, 132, 160, 0.35)); }
+.result-art { width: 130px; height: auto; filter: drop-shadow(0 10px 14px rgba(120, 132, 160, 0.35)); }
+.result-art.float { float: right; width: 96px; margin: 0 0 0.5rem 1rem; }
 
 /* cards */
 .card, .panel {
@@ -83,7 +79,7 @@ h3 { margin: 0 0 0.6rem; font-size: 1.1rem; }
 
 fieldset { border: 0; margin: 0 0 1.8rem; padding: 0; min-width: 0; counter-increment: step; }
 form { counter-reset: step; }
-legend { display: flex; align-items: center; gap: 0.7rem; padding: 0; margin-bottom: 0.8rem; font-weight: 700; font-size: 1.1rem; }
+legend { width: 100%; display: flex; align-items: center; gap: 0.7rem; padding: 0; margin-bottom: 0.8rem; font-weight: 700; font-size: 1.1rem; }
 legend::before {
   content: counter(step); display: grid; place-items: center; width: 34px; height: 34px; flex: none;
   border-radius: 50%; background: var(--bg); box-shadow: var(--raised-sm); color: var(--ink); font-size: 0.95rem;
@@ -133,7 +129,7 @@ fieldset > .check { margin-top: 0.9rem; }
 
 /* results */
 .results { margin-top: 1rem; outline: none; }
-.aqi-card { display: grid; gap: 1.5rem; grid-template-columns: auto 1fr; align-items: center; }
+.aqi-card { display: grid; gap: 1.5rem; grid-template-columns: auto 1fr auto; align-items: center; }
 .aqi-badge {
   display: grid; place-items: center; width: 150px; height: 150px; border-radius: 50%; border: 10px solid transparent; text-align: center;
   background: linear-gradient(var(--bg), var(--bg)) padding-box, linear-gradient(135deg, var(--glow), var(--glow2)) border-box;
@@ -204,10 +200,9 @@ abbr[title] { text-decoration: underline dotted; cursor: help; }
 
 @media (max-width: 760px) {
   .hero { grid-template-columns: 1fr; padding-top: 2rem; }
-  .hero-art { min-height: 190px; order: -1; }
-  .clay.big { width: 150px; height: 150px; right: 18%; }
-  .clay.ring { width: 96px; height: 96px; right: 40%; }
-  .clay.capsule { width: 66px; height: 120px; }
+  .hero-art { order: -1; }
+  .hero-art img { max-width: 300px; }
+  .fs-art { width: 50px; }
 }
 @media (max-width: 640px) {
   .aqi-card { grid-template-columns: 1fr; justify-items: center; text-align: center; }

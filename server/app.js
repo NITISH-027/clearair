@@ -17,6 +17,7 @@ const MIME = new Map([
   ['.css', 'text/css; charset=utf-8'],
   ['.svg', 'image/svg+xml'],
   ['.ico', 'image/x-icon'],
+  ['.webp', 'image/webp'],
   ['.txt', 'text/plain; charset=utf-8'],
 ]);
 

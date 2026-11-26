@@ -26,7 +26,10 @@ function renderAqiCard(plan, air) {
   } else {
     meta.append(el('p', { class: 'fine', text: `PM2.5 ${Math.round(air.current.pm25)} ug/m3 now. Model forecast, not a street monitor.` }));
   }
-  return el('section', { class: 'panel aqi-card', 'aria-label': 'Current air quality' }, [badge, meta]);
+  const art = plan.aqi > 100
+    ? el('img', { class: 'result-art', src: '/img/mask.webp', alt: '', width: '480', height: '343' })
+    : el('img', { class: 'result-art', src: '/img/house.webp', alt: '', width: '480', height: '479' });
+  return el('section', { class: 'panel aqi-card', 'aria-label': 'Current air quality' }, [badge, meta, art]);
 }
 
 function renderAi(ai) {
@@ -103,6 +106,7 @@ function renderExposure(plan) {
     : 'Your current habits already keep the PM2.5 you inhale low today.';
   const guide = el('abbr', { title: 'WHO Global Air Quality Guidelines 2021: the 24-hour average should stay at or below 15 ug/m3.', text: 'WHO 24-hour guideline' });
   return el('section', { class: 'panel', 'aria-label': 'Your exposure' }, [
+    el('img', { class: 'result-art float', src: '/img/purifier.webp', alt: '', width: '408', height: '520' }),
     el('h2', { text: 'What your choices change' }),
     el('p', { class: 'big-number', text: `${e.reductionPercent}%` }),
     el('p', { text: headline }),

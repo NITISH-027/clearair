@@ -26,6 +26,9 @@ test('serves static assets and shared modules, and blocks traversal', async () =
   await withServer({ env: {} }, async (base) => {
     assert.equal((await fetch(`${base}/styles.css`)).status, 200);
     assert.equal((await fetch(`${base}/shared/aqi.js`)).status, 200);
+    const img = await fetch(`${base}/img/hero.webp`);
+    assert.equal(img.status, 200);
+    assert.equal(img.headers.get('content-type'), 'image/webp');
     for (const bad of ['/..%2fserver.js', '/shared/..%2f..%2fpackage.json', '/%00', '/shared/%2e%2e/server.js', '/package.json', '/server.js', '/%E0%A4%A', '/shared', '/nope.js', '/shared/missing.js', '/.env']) {
       const res = await fetch(`${base}${bad}`);
       assert.ok([400, 404].includes(res.status), `${bad} -> ${res.status}`);

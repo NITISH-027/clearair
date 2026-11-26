@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 
 // Paths are relative to the repo root, where `npm test` runs.
 const html = readFileSync('public/index.html', 'utf8');
@@ -18,7 +18,6 @@ test('the page keeps its accessibility landmarks and decorative art is hidden fr
   assert.match(html, /class="skip-link"/);
   assert.match(html, /<main id="main">/);
   assert.match(html, /role="status" aria-live="polite"/);
-  assert.match(html, /class="hero-art" aria-hidden="true"/);
   const labelled = [...html.matchAll(/<input id="([^"]+)"/g)].map((m) => m[1]);
   for (const id of labelled) assert.ok(html.includes(`for="${id}"`), `missing label for #${id}`);
 });
@@ -28,4 +27,27 @@ test('the stylesheet respects reduced motion, keeps a focus ring and loads no re
   assert.match(css, /:focus-visible/);
   assert.ok(!/url\(\s*['"]?https?:/i.test(css));
   assert.ok(!/@import/i.test(css));
+});
+
+test('every image is a local WebP file, decorative (empty alt), sized and under 60 KB', () => {
+  const imgs = [...html.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]);
+  assert.equal(imgs.length, 6);
+  for (const tag of imgs) {
+    assert.match(tag, /alt=""/);
+    assert.match(tag, /\bwidth="\d+"/);
+    assert.match(tag, /\bheight="\d+"/);
+    const src = /src="(\/img\/[a-z]+\.webp)"/.exec(tag);
+    assert.ok(src, `image must be a local WebP: ${tag}`);
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- path comes from our own HTML
+    assert.ok(statSync(`public${src[1]}`).size < 60 * 1024, `${src[1]} is over 60 KB`);
+  }
+});
+
+test('every image the scripts add exists on disk', () => {
+  const js = readFileSync('public/js/render.js', 'utf8');
+  const srcs = [...js.matchAll(/src: '(\/img\/[a-z]+\.webp)'/g)].map((m) => m[1]);
+  assert.equal(srcs.length, 3);
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- path comes from our own script
+  for (const src of srcs) assert.ok(statSync(`public${src}`).size < 60 * 1024);
+  assert.ok(!/<img[^>]*src="http/i.test(html));
 });
