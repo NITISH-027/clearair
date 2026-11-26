@@ -6,7 +6,7 @@ import { withRetry } from './retry.js';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 export const DEFAULT_MODEL = 'gemini-3.8-flash';
-/** Tried in order, only when the chosen model answers 404 (retired or not open to this key). */
+/** Tried in order when the chosen model answers 404 (retired), 429 (quota) or 5xx (overloaded) after its own retries. */
 export const FALLBACK_MODELS = Object.freeze(['gemini-flash-latest', 'gemini-2.5-flash-lite']);
 export const AI_TIMEOUT_MS = 30_000;
 export const AI_ATTEMPTS = 2;
@@ -220,8 +220,7 @@ export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, rand
       return await callModel(model);
     } catch (err) {
       lastError = err;
-      const modelMissing = err instanceof UpstreamError && err.kind === 'status' && err.status === 404;
-      if (!modelMissing) break;
+      if (!shouldTryNextModel(err)) break;
     }
   }
   throw toAiError(lastError);
@@ -253,6 +252,10 @@ function thinkingConfig(env) {
   const raw = env.GEMINI_THINKING_BUDGET;
   if (raw === undefined || raw === '' || !/^\d{1,5}$/.test(raw)) return {};
   return { thinkingConfig: { thinkingBudget: Number(raw) } };
+}
+
+function shouldTryNextModel(err) {
+  return err instanceof UpstreamError && err.kind === 'status' && (err.status === 404 || err.status === 429 || err.status >= 500);
 }
 
 const MODEL_NAME = /^[a-z0-9.-]{3,40}$/i;

@@ -30,12 +30,12 @@ flowchart LR
 | Code quality | Small single-purpose ES modules (`server/`, `shared/`, `public/js/`), no runtime dependencies, pure planning and model code separated from I/O, JSDoc and cited formulas, ESLint with strict rules |
 | Security | Strict CSP, CORS allowlist, per-route input validation and body cap, rate limits (plan 20/min, Gemini 8/min per client), prompt-injection defense, key only in env and header, `.env.example`, `.gitignore`, ESLint security plugin and Semgrep clean, `npm audit` 0 |
 | Efficiency | 15 min TTL caches with in-flight de-duplication for AQI fetches and identical Gemini requests, preloaded static files, no runtime dependencies, repo well under 1 MB |
-| Testing | 112 tests (unit and HTTP integration) using the Node test runner, coverage gate in CI |
+| Testing | 114 tests (unit and HTTP integration) using the Node test runner, coverage gate in CI |
 | Accessibility | Semantic landmarks, labelled fields, visible focus, contrast checked, live region for results, reduced-motion support, works without a mouse |
 
 ## Gemini pipeline (`server/ai-plan.js`)
 
-- Request: REST `generateContent` with `responseMimeType: application/json` and a `responseSchema`. The key is sent in the `x-goog-api-key` header, never in a URL or log. Model defaults to `gemini-3.8-flash` (the model Google's API named when it retired `gemini-2.5-flash` for new users); set `GEMINI_MODEL` to change it. If the chosen model answers HTTP 404, the pipeline tries `gemini-flash-latest` then `gemini-2.5-flash-lite` before falling back to the rule-based plan. Other errors are not retried on another model. If replies are slow or time out on a thinking model, set `GEMINI_THINKING_BUDGET` (for example `0` or `1024`) to cap hidden reasoning tokens; it is only sent when set.
+- Request: REST `generateContent` with `responseMimeType: application/json` and a `responseSchema`. The key is sent in the `x-goog-api-key` header, never in a URL or log. Model defaults to `gemini-3.8-flash` (the model Google's API named when it retired `gemini-2.5-flash` for new users); set `GEMINI_MODEL` to change it. If the chosen model answers HTTP 404, 429 or 5xx (after its own retries with backoff), the pipeline tries `gemini-flash-latest` then `gemini-2.5-flash-lite` before falling back to the rule-based plan. Auth and bad-request errors (400, 401, 403) and timeouts do not switch models. If replies are slow or time out on a thinking model, set `GEMINI_THINKING_BUDGET` (for example `0` or `1024`) to cap hidden reasoning tokens; it is only sent when set.
 - Output is parsed and **strictly validated** (types, lengths, step count). Recoverable malformed output (code fences, trailing text) is repaired once; anything else is rejected.
 - Reliability: per-attempt timeout (30 s), 2 attempts with exponential backoff and jitter on 429/5xx/network errors.
 - Fallback: only if the key is missing, the user did not opt in, the rate limit is hit, or the call fails (`timeout`, `api_error`, `invalid_output`, `rate_limited`, `no_api_key`). The response carries `ai.source` (`gemini`, `fallback`, `off`) and a human label, and the UI shows a banner saying which plan you are reading.
@@ -103,7 +103,7 @@ Deploy the Dockerfile on Render or Cloud Run, set `GEMINI_API_KEY` and `TRUST_PR
 npm run lint            # ESLint, strict rules + eslint-plugin-security: 0 errors, 0 warnings
 semgrep --config p/javascript --metrics off .   # 0 findings (68 rules)
 npm audit               # 0 vulnerabilities
-npm run test:coverage   # 112 tests; 100% lines, 97% branches, 99% functions
+npm run test:coverage   # 114 tests; 100% lines, 97% branches, 99% functions
 ```
 
 CI (`.github/workflows/ci.yml`) runs lint, `npm audit`, Semgrep, tests with coverage thresholds, and a Docker build.

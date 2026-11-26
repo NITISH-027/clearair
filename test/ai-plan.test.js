@@ -230,3 +230,22 @@ test('by default the pipeline makes two attempts per model', async () => {
   await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', sleep: noSleep }), (e) => e.code === 'timeout');
   assert.equal(f.calls.length, 2);
 });
+
+test('a 503 on the chosen model is retried, then the next model answers', async () => {
+  const tried = [];
+  const delays = [];
+  const fetchImpl = async (url) => {
+    tried.push(url.match(/models\/([^:]+):/)[1]);
+    return tried.length <= 2 ? json({}, false, 503) : geminiReply();
+  };
+  const result = await generateAiPlan({ fetchImpl, env, facts, notes: '', sleep: async (ms) => { delays.push(ms); } });
+  assert.deepEqual(tried, ['gemini-3.8-flash', 'gemini-3.8-flash', 'gemini-flash-latest']);
+  assert.equal(delays.length, 1);
+  assert.equal(result.model, 'gemini-flash-latest');
+});
+
+test('a 429 on every model ends as api_error', async () => {
+  const f = fakeFetch([['generateContent', json({ error: { message: 'quota' } }, false, 429)]]);
+  await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', sleep: noSleep }), (e) => e.code === 'api_error' && e.detail === 'HTTP 429: quota');
+  assert.equal(f.calls.length, 6);
+});

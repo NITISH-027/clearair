@@ -17,7 +17,7 @@ if (!process.env.GEMINI_API_KEY) {
 }
 const started = Date.now();
 try {
-  const out = await generateAiPlan({ fetchImpl: fetch, env: process.env, facts, notes: '', attempts: 1, timeoutMs: 90_000 });
+  const out = await generateAiPlan({ fetchImpl: fetch, env: process.env, facts, notes: '', attempts: 2, timeoutMs: 90_000 });
   console.log(`OK with model ${out.model} in ${Date.now() - started} ms: ${out.steps.length} steps. Summary: ${out.summary}`);
 } catch (err) {
   console.error(`FAILED after ${Date.now() - started} ms: ${err.code ?? err.name}${err.detail ? ` (${err.detail})` : ''}`);
