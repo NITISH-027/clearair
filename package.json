@@ -1,0 +1,13 @@
+{
+  "name": "clearair",
+  "version": "1.0.0",
+  "description": "ClearAir: a winter-smog assistant that turns today's air quality into a personal plan and shows the impact of each choice.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test \"test/*.test.js\""
+  }
+}

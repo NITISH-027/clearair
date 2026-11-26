@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="ClearAir turns today's air quality into a personal winter smog plan, and shows how much each choice cuts your exposure.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b1016">
+  <title>ClearAir: your winter smog plan</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%2338e0c0'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body data-level="0">
+  <a class="skip-link" href="#plan-form">Skip to the form</a>
+
+  <header class="hero">
+    <p class="eyebrow">Winter smog assistant</p>
+    <h1>Breathe a little easier, today.</h1>
+    <p class="lede">Tell us about your day. We read the live air quality for your city and build a plan for your routine, your home and your family, and we show how much each step cuts what you breathe in.</p>
+  </header>
+
+  <main id="main">
+    <section class="card" aria-labelledby="form-title">
+      <h2 id="form-title">Your day</h2>
+      <form id="plan-form" novalidate>
+        <fieldset>
+          <legend>Where are you?</legend>
+          <div class="row">
+            <div class="field grow">
+              <label for="city">City or area</label>
+              <input id="city" name="city" type="text" autocomplete="address-level2" maxlength="80" placeholder="For example, Delhi" aria-describedby="city-hint city-error">
+              <p id="city-hint" class="hint">We look up the live air quality for this place.</p>
+              <p id="city-error" class="error" role="alert" hidden></p>
+            </div>
+            <button type="button" id="locate" class="btn secondary">Use my location</button>
+          </div>
+          <details class="manual">
+            <summary>No connection? Enter the AQI yourself</summary>
+            <div class="field">
+              <label for="manual-aqi">AQI reading (0 to 500)</label>
+              <input id="manual-aqi" name="manualAqi" type="number" inputmode="numeric" min="0" max="500" step="1" aria-describedby="aqi-error">
+              <p id="aqi-error" class="error" role="alert" hidden></p>
+            </div>
+          </details>
+        </fieldset>
+
+        <fieldset>
+          <legend>Who is at home?</legend>
+          <p class="hint">Tick anyone who is more sensitive to smog. We use stricter advice for them.</p>
+          <div class="checks">
+            <label class="check"><input type="checkbox" name="children"> <span>Children</span></label>
+            <label class="check"><input type="checkbox" name="elderly"> <span>Older adults</span></label>
+            <label class="check"><input type="checkbox" name="respiratory"> <span>Asthma or lung or heart condition</span></label>
+            <label class="check"><input type="checkbox" name="pregnant"> <span>Pregnancy</span></label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Your routine</legend>
+          <div class="row">
+            <div class="field grow">
+              <label for="mode">How do you get around?</label>
+              <select id="mode" name="mode">
+                <option value="wfh">I stay home</option>
+                <option value="walk">Walk</option>
+                <option value="cycle">Cycle</option>
+                <option value="twowheeler" selected>Scooter or motorbike</option>
+                <option value="bus">Bus or auto</option>
+                <option value="metro">Metro or train</option>
+                <option value="car">Car</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="commute-hours">Travel hours per day</label>
+              <input id="commute-hours" name="commuteHours" type="number" inputmode="decimal" min="0" max="6" step="0.5" value="1" aria-describedby="routine-error">
+            </div>
+            <div class="field">
+              <label for="exercise-hours">Outdoor exercise hours</label>
+              <input id="exercise-hours" name="exerciseHours" type="number" inputmode="decimal" min="0" max="4" step="0.5" value="0.5" aria-describedby="routine-error">
+            </div>
+          </div>
+          <p id="routine-error" class="error" role="alert" hidden></p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Your home</legend>
+          <div class="row">
+            <div class="field grow">
+              <label for="cooking">Main cooking fuel</label>
+              <select id="cooking" name="cooking">
+                <option value="lpg" selected>LPG or gas</option>
+                <option value="induction">Induction</option>
+                <option value="electric">Electric stove</option>
+                <option value="biomass">Wood, dung or coal</option>
+              </select>
+            </div>
+            <div class="field">
+              <span class="label" id="windows-label">Windows are usually</span>
+              <div class="segmented" role="radiogroup" aria-labelledby="windows-label">
+                <label><input type="radio" name="windows" value="open" checked> <span>Open</span></label>
+                <label><input type="radio" name="windows" value="closed"> <span>Closed</span></label>
+              </div>
+            </div>
+          </div>
+          <label class="check"><input type="checkbox" name="purifier"> <span>I already have an air purifier</span></label>
+        </fieldset>
+
+        <button type="submit" id="submit" class="btn primary">Build my plan</button>
+      </form>
+    </section>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <section id="results" class="results" tabindex="-1" aria-labelledby="results-title" hidden>
+      <h2 id="results-title" class="visually-hidden">Your plan</h2>
+      <div id="results-body"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Air data: Open-Meteo Air Quality (CAMS model), shown on the US AQI scale. Readings are model estimates and can differ from your nearest monitor.</p>
+    <p>The impact numbers come from a simple, open exposure model for comparing choices. They are not medical advice. If you feel unwell, speak to a doctor.</p>
+  </footer>
+</body>
+</html>
