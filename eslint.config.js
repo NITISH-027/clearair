@@ -17,6 +17,6 @@ export default [
       'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },
   },
-  { files: ['server.js', 'server/**', 'test/**'], languageOptions: { globals: globals.node, sourceType: 'module' } },
+  { files: ['server.js', 'server/**', 'scripts/**', 'test/**'], languageOptions: { globals: globals.node, sourceType: 'module' } },
   { files: ['public/**', 'shared/**'], languageOptions: { globals: { ...globals.browser }, sourceType: 'module' } },
 ];

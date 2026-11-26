@@ -172,3 +172,19 @@ test('generateAiPlan survives a network failure and an unparsable body', async (
   const bad = fakeFetch([['generateContent', { ok: true, status: 200, json: async () => { throw new Error('bad'); } }]]);
   await assert.rejects(generateAiPlan({ fetchImpl: bad, env, facts, notes: '', sleep: noSleep }), (e) => e.code === 'api_error');
 });
+
+test('an HTTP error surfaces the status and Google message as detail, never the key', async () => {
+  const fetchImpl = async () => ({ ok: false, status: 404, json: async () => ({ error: { message: 'models/nope is not found' } }) });
+  await assert.rejects(
+    generateAiPlan({ fetchImpl, env: { GEMINI_API_KEY: 'SECRET-KEY-123', GEMINI_MODEL: 'nope' }, facts: {}, notes: '', sleep: async () => {} }),
+    (err) => err.code === 'api_error' && err.detail === 'HTTP 404: models/nope is not found' && !JSON.stringify(err).includes('SECRET'),
+  );
+});
+
+test('an HTTP error with a non-JSON body still reports the status', async () => {
+  const fetchImpl = async () => ({ ok: false, status: 403, json: async () => { throw new SyntaxError('html'); } });
+  await assert.rejects(
+    generateAiPlan({ fetchImpl, env: { GEMINI_API_KEY: 'k' }, facts: {}, notes: '', sleep: async () => {} }),
+    (err) => err.detail === 'HTTP 403',
+  );
+});

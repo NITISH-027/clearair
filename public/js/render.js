@@ -50,6 +50,9 @@ function renderAi(ai) {
     el('p', { text: ai.label }),
   ];
   if (ai.notice) children.push(el('p', { class: 'fine', text: ai.notice }));
+  if (ai.source === 'fallback' && ai.reason) {
+    children.push(el('p', { class: 'fine', text: `Reason: ${ai.reason}${ai.detail ? ` (${ai.detail})` : ''}` }));
+  }
   return el('section', { class: 'panel ai-banner fallback', 'aria-label': 'Plan source' }, children);
 }
 

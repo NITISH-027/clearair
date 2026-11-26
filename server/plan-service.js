@@ -24,8 +24,14 @@ export function createPlanService({ fetchImpl = fetch, env = process.env, sleep,
   const airDeps = { fetchImpl, airCache, retry: { sleep, random, ...retry } };
   const aiEnabled = Boolean(env.GEMINI_API_KEY);
 
-  function fallback(reason, notice) {
-    return { source: 'fallback', reason, label: FALLBACK_LABELS.get(reason), ...(notice ? { notice } : {}) };
+  function fallback(reason, notice, detail) {
+    return {
+      source: 'fallback',
+      reason,
+      label: FALLBACK_LABELS.get(reason),
+      ...(notice ? { notice } : {}),
+      ...(detail ? { detail } : {}),
+    };
   }
 
   async function aiFor({ plan, air, profile, notes, clientId }) {
@@ -42,7 +48,9 @@ export function createPlanService({ fetchImpl = fetch, env = process.env, sleep,
           const result = await generateAiPlan({ fetchImpl, env, facts, notes: notes.value, sleep, random });
           return { source: 'gemini', model: result.model, summary: result.summary, steps: result.steps };
         } catch (err) {
-          return fallback(err.code); // generateAiPlan only throws AiError
+          // generateAiPlan only throws AiError. Log the reason (never the key) so the host logs show why.
+          console.warn(`[gemini] fallback: ${err.code}${err.detail ? ` (${err.detail})` : ''}`);
+          return fallback(err.code, undefined, err.detail);
         }
       },
       (value) => value.source === 'gemini',

@@ -30,7 +30,7 @@ flowchart LR
 | Code quality | Small single-purpose ES modules (`server/`, `shared/`, `public/js/`), no runtime dependencies, pure planning and model code separated from I/O, JSDoc and cited formulas, ESLint with strict rules |
 | Security | Strict CSP, CORS allowlist, per-route input validation and body cap, rate limits (plan 20/min, Gemini 8/min per client), prompt-injection defense, key only in env and header, `.env.example`, `.gitignore`, ESLint security plugin and Semgrep clean, `npm audit` 0 |
 | Efficiency | 15 min TTL caches with in-flight de-duplication for AQI fetches and identical Gemini requests, preloaded static files, no runtime dependencies, repo well under 1 MB |
-| Testing | 105 tests (unit and HTTP integration) using the Node test runner, coverage gate in CI |
+| Testing | 107 tests (unit and HTTP integration) using the Node test runner, coverage gate in CI |
 | Accessibility | Semantic landmarks, labelled fields, visible focus, contrast checked, live region for results, reduced-motion support, works without a mouse |
 
 ## Gemini pipeline (`server/ai-plan.js`)
@@ -80,6 +80,8 @@ GEMINI_API_KEY=... npm start   # http://localhost:8080 ; omit the key to see the
 npm run check        # lint + tests with coverage gate
 ```
 
+If the page shows the rule-based fallback while AI is ticked, the banner and the server log print the reason and Google's error. Run `npm run diagnose` (with `GEMINI_API_KEY` set) to see the raw failure; set `GEMINI_MODEL` if the model name is rejected.
+
 Get a free Gemini key at https://aistudio.google.com/apikey. Node 20 or newer.
 
 ### Docker
@@ -101,7 +103,7 @@ Deploy the Dockerfile on Render or Cloud Run, set `GEMINI_API_KEY` and `TRUST_PR
 npm run lint            # ESLint, strict rules + eslint-plugin-security: 0 errors, 0 warnings
 semgrep --config p/javascript --metrics off .   # 0 findings (68 rules)
 npm audit               # 0 vulnerabilities
-npm run test:coverage   # 105 tests; 100% lines, 97% branches, 99% functions
+npm run test:coverage   # 107 tests; 100% lines, 97% branches, 99% functions
 ```
 
 CI (`.github/workflows/ci.yml`) runs lint, `npm audit`, Semgrep, tests with coverage thresholds, and a Docker build.

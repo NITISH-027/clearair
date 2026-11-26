@@ -39,8 +39,9 @@ export const RESPONSE_SCHEMA = Object.freeze({
 
 /** Failure to get a usable plan from the model. `code` is timeout, api_error or invalid_output. */
 export class AiError extends Error {
-  constructor(code) {
+  constructor(code, detail = '') {
     super(`AI ${code}`);
+    this.detail = detail;
     this.name = 'AiError';
     this.code = code;
   }
@@ -202,7 +203,7 @@ export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, rand
     contents: [{ role: 'user', parts: [{ text: user }] }],
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 4096,
       responseMimeType: 'application/json',
       responseSchema: RESPONSE_SCHEMA,
     },
@@ -228,6 +229,10 @@ export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, rand
   } catch (err) {
     // Whatever went wrong, the caller only ever sees an AiError so the rule-based plan can take over.
     if (err instanceof AiError) throw err;
-    throw new AiError(err instanceof UpstreamError && err.kind === 'timeout' ? 'timeout' : 'api_error');
+    if (err instanceof UpstreamError) {
+      const detail = err.kind === 'status' ? `HTTP ${err.status}${err.detail ? `: ${err.detail}` : ''}` : err.kind;
+      throw new AiError(err.kind === 'timeout' ? 'timeout' : 'api_error', detail);
+    }
+    throw new AiError('api_error', 'unexpected error');
   }
 }
