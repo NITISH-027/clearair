@@ -116,7 +116,7 @@ test('generateAiPlan honours GEMINI_MODEL and rejects unsafe model names', async
 test('generateAiPlan retries 503 with exponential backoff, then succeeds', async () => {
   const f = fakeFetch([['generateContent', [json({}, false, 503), json({}, false, 429), geminiReply()]]]);
   const delays = [];
-  const result = await generateAiPlan({ fetchImpl: f, env, facts, notes: '', sleep: async (ms) => { delays.push(ms); }, random: () => 1 });
+  const result = await generateAiPlan({ fetchImpl: f, env, facts, notes: '', attempts: 3, sleep: async (ms) => { delays.push(ms); }, random: () => 1 });
   assert.equal(result.steps.length, 3);
   assert.equal(f.calls.length, 3);
   assert.deepEqual(delays, [300, 600]);
@@ -124,20 +124,20 @@ test('generateAiPlan retries 503 with exponential backoff, then succeeds', async
 
 test('generateAiPlan recovers from malformed JSON on a later attempt', async () => {
   const f = fakeFetch([['generateContent', [geminiReply('this is not json'), geminiReply('{"summary": "x"}'), geminiReply('```json\n' + JSON.stringify(goodAiPlan) + '\n```')]]]);
-  const result = await generateAiPlan({ fetchImpl: f, env, facts, notes: '', sleep: noSleep });
+  const result = await generateAiPlan({ fetchImpl: f, env, facts, notes: '', attempts: 3, sleep: noSleep });
   assert.equal(result.steps.length, 3);
   assert.equal(f.calls.length, 3);
 });
 
 test('generateAiPlan gives up with invalid_output after repeated bad answers', async () => {
   const f = fakeFetch([['generateContent', geminiReply('{"summary":"nope"}')]]);
-  await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', sleep: noSleep }), (e) => e instanceof AiError && e.code === 'invalid_output');
+  await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', attempts: 3, sleep: noSleep }), (e) => e instanceof AiError && e.code === 'invalid_output');
   assert.equal(f.calls.length, 3);
 });
 
 test('generateAiPlan reports timeouts and retries them', async () => {
   const f = fakeFetch([['generateContent', timeoutError()]]);
-  await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', sleep: noSleep }), (e) => e.code === 'timeout');
+  await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', attempts: 3, sleep: noSleep }), (e) => e.code === 'timeout');
   assert.equal(f.calls.length, 3);
 });
 
@@ -223,4 +223,10 @@ test('GEMINI_THINKING_BUDGET is sent only when it is a plain integer', async () 
     const cfg = JSON.parse(f.calls[0].init.body).generationConfig;
     assert.equal(cfg.thinkingConfig?.thinkingBudget, expected, value);
   }
+});
+
+test('by default the pipeline makes two attempts per model', async () => {
+  const f = fakeFetch([['generateContent', timeoutError()]]);
+  await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', sleep: noSleep }), (e) => e.code === 'timeout');
+  assert.equal(f.calls.length, 2);
 });
