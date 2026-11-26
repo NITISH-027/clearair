@@ -1,4 +1,14 @@
 node_modules/
+coverage/
 .env
+.env.*
+!.env.example
 *.log
+*.pem
+*.key
 .DS_Store
+.semgrep/
+.git
+test
+.github
+README.md

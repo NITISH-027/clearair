@@ -1,11 +1,26 @@
-name: tests
+name: ci
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
-  test:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm test
+      - run: npm install
+      - name: Lint (ESLint + security plugin)
+        run: npm run lint
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Semgrep
+        run: pip install semgrep && semgrep --config p/javascript --metrics off --error --exclude node_modules .
+      - name: Tests with coverage gate
+        run: npm run test:coverage
+      - name: Docker build
+        run: docker build -t clearair .

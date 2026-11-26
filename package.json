@@ -5,9 +5,20 @@
   "type": "module",
   "private": true,
   "license": "MIT",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-coverage-exclude=server.js --test-coverage-lines=95 --test-coverage-branches=90 --test-coverage-functions=95 \"test/*.test.js\"",
+    "lint": "eslint .",
+    "check": "npm run lint && npm run test:coverage"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "eslint-plugin-security": "^3.0.1",
+    "globals": "^15.0.0"
   }
 }

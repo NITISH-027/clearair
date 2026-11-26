@@ -1,5 +1,5 @@
 import { aqiToPm25, categoryFor } from './aqi.js';
-import { exposureDose, percentReduction, MODES } from './exposure.js';
+import { exposureDetail, percentReduction, MODES, WHO_24H_GUIDELINE } from './exposure.js';
 
 export const SECTIONS = Object.freeze([
   { id: 'routine', title: 'Your day, step by step' },
@@ -28,14 +28,13 @@ export function findBestWindow(hourly) {
     return Number.isFinite(p.pm25) && hour >= 6 && hour <= 20;
   });
   let best = null;
-  for (let i = 0; i < usable.length - 1; i += 1) {
-    const a = usable[i];
-    const b = usable[i + 1];
+  usable.slice(0, -1).forEach((a, i) => {
+    const b = usable.at(i + 1);
     const gap = (new Date(`${b.time}:00Z`) - new Date(`${a.time}:00Z`)) / 3600000;
-    if (gap !== 1) continue;
+    if (gap !== 1) return;
     const avg = (a.pm25 + b.pm25) / 2;
     if (best === null || avg < best.pm25) best = { startTime: a.time, pm25: avg };
-  }
+  });
   if (!best) return null;
   const endHour = Number(best.startTime.slice(11, 13)) + 2;
   const end = `${best.startTime.slice(0, 11)}${String(endHour).padStart(2, '0')}:00`;
@@ -134,7 +133,7 @@ const ACTIONS = [
     applies: (c) => c.profile.home.windows === 'open' && c.level >= 2,
     title: 'Keep windows and doors closed',
     action: () => 'Close windows, and seal obvious gaps with door strips or a damp towel.',
-    why: 'Closing up cuts the outdoor particles that leak in by roughly a third to a half in this model. Your home becomes a shelter instead of an extension of the street.',
+    why: 'Fewer air exchanges means fewer outdoor particles drift in, and indoor particles settle out faster than they are replaced. Your home becomes a shelter instead of an extension of the street.',
   },
   {
     id: 'get-purifier',
@@ -142,8 +141,8 @@ const ACTIONS = [
     flag: 'purifier',
     applies: (c) => !c.profile.home.purifier && c.level >= 3,
     title: 'Run a HEPA purifier in your main room',
-    action: () => 'Use a HEPA purifier sized for the room (check its CADR), or build a low-cost box fan plus MERV 13 filter unit. Keep the door shut.',
-    why: 'A HEPA filter removes most fine particles from the air that does get in, so the room where you spend the most hours stays much cleaner.',
+    action: () => 'Use a HEPA purifier sized for the room (a CADR of at least 5 air changes per hour: room volume in m3 x 5), or build a low-cost box fan plus MERV 13 filter unit. Keep the door shut.',
+    why: 'A purifier adds a clean-air term (CADR divided by room volume) to the room\'s air balance. At 5 air changes an hour it removes most particles that leak in, so the room where you spend the most hours stays much cleaner.',
   },
   {
     id: 'use-purifier',
@@ -160,7 +159,7 @@ const ACTIONS = [
     applies: (c) => c.profile.home.cooking === 'biomass',
     title: 'Move cooking off wood, dung or coal',
     action: () => 'Switch to LPG or an induction cooktop. Until you can, cook near an open door or vent and keep children out of the kitchen.',
-    why: 'Burning biomass indoors produces very high PM2.5 right where you breathe it. It is often the biggest indoor source in a home.',
+    why: 'Burning biomass indoors produces very high PM2.5 right where you breathe it. WHO reports it as one of the largest sources of household air pollution.',
   },
   {
     id: 'cooking-vent',
@@ -258,14 +257,14 @@ export const ACTION_CATALOG = Object.freeze(
 );
 
 function summaryFor(category, level, bestWindow, sensitive) {
-  const base = {
-    0: 'The air is clean. Enjoy the outdoors and keep up your good habits.',
-    1: 'The air is acceptable for most people. A few easy habits keep it that way.',
-    2: 'Sensitive groups should cut back on heavy outdoor activity today.',
-    3: 'Everyone can feel effects. Reduce time outside and clean your indoor air.',
-    4: 'This is a smog emergency for most people. Stay in and filter your indoor air.',
-    5: 'Hazardous air. Stay indoors with the cleanest air you can make and avoid any exertion.',
-  }[level];
+  const base = [
+    'The air is clean. Enjoy the outdoors and keep up your good habits.',
+    'The air is acceptable for most people. A few easy habits keep it that way.',
+    'Sensitive groups should cut back on heavy outdoor activity today.',
+    'Everyone can feel effects. Reduce time outside and clean your indoor air.',
+    'This is a smog emergency for most people. Stay in and filter your indoor air.',
+    'Hazardous air. Stay indoors with the cleanest air you can make and avoid any exertion.',
+  ].at(level);
   const extra = sensitive && category.index === 1 ? ' Your household includes sensitive members, so we use stricter advice.' : '';
   const window = bestWindow && level >= 2 ? ` Cleanest window today: ${bestWindow.label}.` : '';
   return `${base}${extra}${window}`;
@@ -282,7 +281,8 @@ export function buildPlan(profile, air) {
   const bestWindow = air.source === 'manual' ? null : findBestWindow(air.hourly);
   const pm25 = representativePm25(air);
   const ctx = { profile, level, bestWindow, pm25, bestPm25: bestWindow ? bestWindow.pm25 : null };
-  const baseDose = exposureDose(ctx);
+  const base = exposureDetail(ctx);
+  const baseDose = base.dose;
 
   const items = [];
   const recommendedFlags = {};
@@ -298,14 +298,15 @@ export function buildPlan(profile, air) {
     if (def.note) item.note = def.note;
     if (def.flag) {
       // Do not stack alternatives: an indoor workout replaces a window shift.
-      const pct = percentReduction(baseDose, exposureDose(ctx, { [def.flag]: true }));
+      const pct = percentReduction(baseDose, exposureDetail(ctx, { [def.flag]: true }).dose);
       if (pct >= 1) item.impactPercent = pct;
       recommendedFlags[def.flag] = true;
     }
     items.push(item);
   }
 
-  const withPlanDose = exposureDose(ctx, recommendedFlags);
+  const withPlan = exposureDetail(ctx, recommendedFlags);
+  const withPlanDose = withPlan.dose;
   const sections = SECTIONS.map((s) => ({ ...s, items: items.filter((i) => i.section === s.id) })).filter(
     (s) => s.items.length > 0,
   );
@@ -322,7 +323,11 @@ export function buildPlan(profile, air) {
       baseline: Math.round(baseDose),
       withPlan: Math.round(withPlanDose),
       reductionPercent: percentReduction(baseDose, withPlanDose),
+      meanConcentration: Math.round(base.meanConcentration * 10) / 10,
+      meanConcentrationWithPlan: Math.round(withPlan.meanConcentration * 10) / 10,
+      whoGuideline: WHO_24H_GUIDELINE,
       pm25Used: Math.round(pm25 * 10) / 10,
+      unit: 'ug of PM2.5 inhaled per day',
     },
   };
 }

@@ -1,7 +1,6 @@
 import { validateCity, validateProfile, validateAqi } from '/shared/validate.js';
-import { buildPlan } from '/shared/planner.js';
-import { fetchAirByCity, fetchAirByCoords, fetchConfig, fetchExplanation } from './api.js';
-import { renderResults, renderAiBox } from './render.js';
+import { fetchConfig, fetchPlan } from './api.js';
+import { renderResults } from './render.js';
 import { clear } from './dom.js';
 
 const form = document.getElementById('plan-form');
@@ -15,10 +14,13 @@ const cityError = document.getElementById('city-error');
 const aqiInput = document.getElementById('manual-aqi');
 const aqiError = document.getElementById('aqi-error');
 const routineError = document.getElementById('routine-error');
+const cadrField = document.getElementById('cadr-field');
+const cadrError = document.getElementById('cadr-error');
+const notesInput = document.getElementById('notes');
+const notesCount = document.getElementById('notes-count');
+const aiToggle = document.getElementById('ai-toggle');
 
-const STORAGE_KEY = 'clearair.profile.v1';
-let aiAvailable = false;
-let lastRun = null;
+const STORAGE_KEY = 'clearair.profile.v2';
 
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
@@ -45,7 +47,7 @@ function readProfile() {
     },
     commute: { mode: data.get('mode'), hours: data.get('commuteHours') },
     exercise: { outdoorHours: data.get('exerciseHours') },
-    home: { windows: data.get('windows'), purifier: data.has('purifier'), cooking: data.get('cooking') },
+    home: { windows: data.get('windows'), purifier: data.has('purifier'), purifierCadr: data.get('cadr'), cooking: data.get('cooking') },
   };
 }
 
@@ -68,13 +70,17 @@ function restoreForm() {
   if (!check.ok) return;
   const p = check.value;
   if (typeof saved.city === 'string' && validateCity(saved.city).ok) cityInput.value = saved.city;
-  for (const key of ['children', 'elderly', 'respiratory', 'pregnant']) form.elements[key].checked = p.household[key];
+  form.elements.namedItem('children').checked = p.household.children;
+  form.elements.namedItem('elderly').checked = p.household.elderly;
+  form.elements.namedItem('respiratory').checked = p.household.respiratory;
+  form.elements.namedItem('pregnant').checked = p.household.pregnant;
   form.elements.mode.value = p.commute.mode;
   form.elements.commuteHours.value = String(p.commute.hours);
   form.elements.exerciseHours.value = String(p.exercise.outdoorHours);
   form.elements.cooking.value = p.home.cooking;
   form.elements.windows.value = p.home.windows;
   form.elements.purifier.checked = p.home.purifier;
+  if (p.home.purifier) form.elements.cadr.value = String(p.home.purifierCadr);
 }
 
 function syncRoutine() {
@@ -83,65 +89,46 @@ function syncRoutine() {
   if (home) form.elements.commuteHours.value = '0';
 }
 
-function show(plan, air, profile) {
-  document.body.dataset.level = String(plan.level);
+function syncPurifier() {
+  cadrField.hidden = !form.elements.purifier.checked;
+}
+
+function show(result) {
+  document.body.dataset.level = String(result.plan.level);
   clear(resultsBody);
-  resultsBody.append(renderResults(plan, air));
-  if (aiAvailable) {
-    resultsBody.append(renderAiBox({ onExplain: explain }));
-  }
-  lastRun = { plan, profile };
+  resultsBody.append(renderResults(result));
   results.hidden = false;
   results.focus({ preventScroll: true });
   results.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-async function explain(button, textNode) {
-  if (!lastRun) return;
-  button.disabled = true;
-  textNode.textContent = 'Writing your explanation...';
-  try {
-    const { text } = await fetchExplanation({
-      aqi: lastRun.plan.aqi,
-      profile: lastRun.profile,
-      actionIds: lastRun.plan.actionIds,
-    });
-    textNode.textContent = text;
-  } catch (err) {
-    textNode.textContent = `${err.message} Your plan above is still complete.`;
-  } finally {
-    button.disabled = false;
-  }
-}
-
-function airFromServer(data) {
-  return {
-    aqi: data.current.aqi,
-    pm25: data.current.pm25,
-    hourly: data.hourly,
-    place: data.place,
-    source: 'live',
-  };
-}
-
-async function run(getAir) {
+/** Validate the form and send `where` ({city} | {lat, lon} | {aqi}) with the profile. */
+async function run(where) {
   routineError.hidden = true;
+  showError(cadrError, null, '');
   const profile = validateProfile(readProfile());
   if (!profile.ok) {
-    showError(routineError, null, profile.errors[0]);
+    const message = profile.errors[0];
+    showError(message.startsWith('Purifier') ? cadrError : routineError, null, message);
     setStatus('Please fix the highlighted field.', true);
     return;
   }
   submitBtn.disabled = true;
   locateBtn.disabled = true;
-  setStatus('Reading the air and building your plan...');
+  // When the server has no AI key, still ask: the response then labels the rule-based plan clearly.
+  const useAi = aiToggle.hidden || form.elements.useAi.checked;
+  setStatus(useAi && !aiToggle.hidden ? 'Reading the air and asking Gemini for your plan...' : 'Reading the air and building your plan...');
   try {
-    const air = await getAir();
-    if (!air) return;
-    const plan = buildPlan(profile.value, air);
-    show(plan, air, profile.value);
+    const result = await fetchPlan({
+      ...where,
+      profile: profile.value,
+      notes: notesInput.value,
+      useAi,
+    });
+    show(result);
     saveForm();
-    setStatus(`Plan ready for ${air.place ? air.place.name : 'your reading'}. AQI ${plan.aqi}, ${plan.category}.`);
+    const where2 = result.air.place ? result.air.place.name : 'your reading';
+    setStatus(`Plan ready for ${where2}. AQI ${result.plan.aqi}, ${result.plan.category}.`);
   } catch (err) {
     setStatus(err.message, true);
   } finally {
@@ -163,7 +150,7 @@ form.addEventListener('submit', (event) => {
       setStatus('Please fix the highlighted field.', true);
       return;
     }
-    run(async () => ({ aqi: aqi.value, source: 'manual', hourly: [] }));
+    run({ aqi: aqi.value });
     return;
   }
   const city = validateCity(cityInput.value);
@@ -173,7 +160,7 @@ form.addEventListener('submit', (event) => {
     setStatus('Please fix the highlighted field.', true);
     return;
   }
-  run(async () => airFromServer(await fetchAirByCity(city.value)));
+  run({ city: city.value });
 });
 
 locateBtn.addEventListener('click', () => {
@@ -183,16 +170,22 @@ locateBtn.addEventListener('click', () => {
   }
   setStatus('Asking your device for your location...');
   navigator.geolocation.getCurrentPosition(
-    (pos) => run(async () => airFromServer(await fetchAirByCoords(pos.coords.latitude, pos.coords.longitude))),
+    (pos) => run({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
     () => setStatus('Location was not shared. Type your city instead.', true),
     { timeout: 10000, maximumAge: 600000 },
   );
 });
 
 form.elements.mode.addEventListener('change', syncRoutine);
+form.elements.purifier.addEventListener('change', syncPurifier);
+notesInput.addEventListener('input', () => {
+  notesCount.textContent = String(notesInput.value.length);
+});
 
 restoreForm();
 syncRoutine();
+syncPurifier();
+notesCount.textContent = String(notesInput.value.length);
 fetchConfig().then((config) => {
-  aiAvailable = Boolean(config.aiAvailable);
+  aiToggle.hidden = !config.aiEnabled;
 });

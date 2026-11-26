@@ -36,7 +36,7 @@
             <button type="button" id="locate" class="btn secondary">Use my location</button>
           </div>
           <details class="manual">
-            <summary>No connection? Enter the AQI yourself</summary>
+            <summary>Data service down? Enter the AQI yourself</summary>
             <div class="field">
               <label for="manual-aqi">AQI reading (0 to 500)</label>
               <input id="manual-aqi" name="manualAqi" type="number" inputmode="numeric" min="0" max="500" step="1" aria-describedby="aqi-error">
@@ -103,7 +103,24 @@
               </div>
             </div>
           </div>
-          <label class="check"><input type="checkbox" name="purifier"> <span>I already have an air purifier</span></label>
+          <label class="check"><input type="checkbox" name="purifier" id="purifier"> <span>I already have an air purifier</span></label>
+          <div class="field cadr" id="cadr-field" hidden>
+            <label for="cadr"><abbr title="Clean Air Delivery Rate: how many cubic metres of cleaned air the purifier delivers per hour (AHAM AC-1 rating)">CADR</abbr> in m&sup3;/h</label>
+            <input id="cadr" name="cadr" type="number" inputmode="numeric" min="20" max="1000" step="10" value="200" aria-describedby="cadr-hint cadr-error">
+            <p id="cadr-hint" class="hint">Printed on the box. If unsure, keep 200.</p>
+            <p id="cadr-error" class="error" role="alert" hidden></p>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Anything else about your day? <span class="optional">(optional)</span></legend>
+          <label for="notes" class="visually-hidden">Notes about your day</label>
+          <textarea id="notes" name="notes" rows="3" maxlength="200" placeholder="For example: I walk my dog at 6 AM and my mother uses a nebuliser." aria-describedby="notes-hint"></textarea>
+          <p id="notes-hint" class="hint"><span id="notes-count">0</span> of 200 characters. We filter this text before it is used.</p>
+          <label class="check" id="ai-toggle" hidden>
+            <input type="checkbox" name="useAi" checked>
+            <span>Personalise with Google Gemini. This sends the AQI, your area's name, the groups you ticked, your routine and your note.</span>
+          </label>
         </fieldset>
 
         <button type="submit" id="submit" class="btn primary">Build my plan</button>

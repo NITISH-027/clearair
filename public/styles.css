@@ -162,3 +162,20 @@ fieldset > .check { margin-top: 0.9rem; }
 .forecast .col.l3 { background: #ff6b6b; }
 .forecast .col.l4 { background: #c77dff; }
 .forecast .col.l5 { background: #ff4d8d; }
+
+textarea { width: 100%; min-height: 96px; padding: 0.7rem 0.8rem; font: inherit; color: var(--text); background: var(--bg-2); border: 1.5px solid var(--line); border-radius: 12px; resize: vertical; }
+textarea::placeholder { color: #8d9db0; }
+.optional { color: var(--muted); font-weight: 400; }
+.cadr { margin-top: 0.9rem; max-width: 260px; }
+abbr[title] { text-decoration: underline dotted; cursor: help; }
+#ai-toggle { margin-top: 0.9rem; }
+.ai-banner { border-left: 5px solid var(--accent); }
+.ai-banner.fallback { border-left-color: #ffd166; }
+.badge { display: inline-block; padding: 0.15rem 0.7rem; border-radius: 999px; font-size: 0.85rem; font-weight: 800; background: var(--accent); color: var(--accent-ink); margin-bottom: 0.5rem; }
+.badge.fallback { background: #ffd166; color: #2a1d00; }
+.tag { display: inline-block; padding: 0.05rem 0.55rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 0.8rem; font-weight: 600; }
+.method { margin-top: 1.5rem; }
+.method summary { cursor: pointer; font-weight: 700; padding: 0.4rem 0; }
+.method code, .method pre { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 0.15rem 0.4rem; font-size: 0.9rem; }
+.method pre { padding: 0.8rem; overflow-x: auto; white-space: pre-wrap; }
+.method ul { color: var(--muted); }

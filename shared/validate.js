@@ -76,6 +76,16 @@ export function validateProfile(input) {
   const cooking = home.cooking ?? 'lpg';
   if (!COOKING_TYPES.includes(cooking)) errors.push('Choose a valid cooking fuel.');
 
+  const purifier = toBool(home.purifier);
+  let purifierCadr = 0;
+  if (purifier) {
+    purifierCadr = home.purifierCadr === undefined || home.purifierCadr === '' ? 200 : toNumber(home.purifierCadr);
+    if (!Number.isFinite(purifierCadr) || purifierCadr < 20 || purifierCadr > 1000) {
+      errors.push('Purifier CADR must be between 20 and 1000 m3/h.');
+      purifierCadr = 200;
+    }
+  }
+
   const value = {
     household: {
       children: toBool(household.children),
@@ -85,7 +95,7 @@ export function validateProfile(input) {
     },
     commute: { mode: mode === 'wfh' ? 'wfh' : mode, hours: mode === 'wfh' ? 0 : hours },
     exercise: { outdoorHours },
-    home: { windows, purifier: toBool(home.purifier), cooking },
+    home: { windows, purifier, purifierCadr, cooking },
   };
   return { ok: errors.length === 0, value, errors };
 }

@@ -29,7 +29,7 @@ function assertFiniteNonNegative(value, name) {
 export function pm25ToAqi(pm25) {
   assertFiniteNonNegative(pm25, 'pm25');
   const capped = Math.min(pm25, 325.4);
-  const bp = PM25_BREAKPOINTS.find((b) => capped <= b.cHigh) ?? PM25_BREAKPOINTS.at(-1);
+  const bp = PM25_BREAKPOINTS.find((b) => capped <= b.cHigh);
   const aqi = ((bp.iHigh - bp.iLow) / (bp.cHigh - bp.cLow)) * (capped - bp.cLow) + bp.iLow;
   return Math.round(aqi);
 }
@@ -38,7 +38,7 @@ export function pm25ToAqi(pm25) {
 export function aqiToPm25(aqi) {
   assertFiniteNonNegative(aqi, 'aqi');
   const capped = Math.min(aqi, 500);
-  const bp = PM25_BREAKPOINTS.find((b) => capped <= b.iHigh) ?? PM25_BREAKPOINTS.at(-1);
+  const bp = PM25_BREAKPOINTS.find((b) => capped <= b.iHigh);
   const pm = ((bp.cHigh - bp.cLow) / (bp.iHigh - bp.iLow)) * (capped - bp.iLow) + bp.cLow;
   return Math.round(pm * 10) / 10;
 }
