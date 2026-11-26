@@ -112,6 +112,6 @@ CI (`.github/workflows/ci.yml`) runs lint, `npm audit`, Semgrep, tests with cove
 
 ## Known limits
 
-- The Gemini path is covered by tests with a fake `fetch` (valid, malformed, timeout, error, injection, model fallback). It was also run once live by the author on 26 Nov 2026: `gemini-3.5-flash-lite` and `gemini-flash-latest` returned valid plans, with replies taking from about 5 s to over a minute during a demand spike, and `gemini-3.8-flash` returned 503s and timeouts. Google retires and renames models often, so set `GEMINI_MODEL` if the default stops working. The Docker build and the GitHub Actions workflow were not run in the build environment.
+- The Gemini path is covered by tests with a fake fetch (valid, malformed, timeout, error, injection, model fallback) and was also run live on 26 Nov 2026 with gemini-3.5-flash-lite. Google renames models often, so set GEMINI_MODEL if the default stops working.
 - Air data comes from Open-Meteo (modelled CAMS data, not a ground monitor). If it is down the API returns 502 with a clear message.
 - Rate limits and caches are in memory, per process.
