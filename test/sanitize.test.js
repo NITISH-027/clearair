@@ -24,7 +24,12 @@ test('injection payloads are detected, including zero-width and markup tricks', 
 });
 
 test('ordinary notes are not flagged', () => {
-  for (const note of ['I walk my dog at 6 AM', 'My mother uses a nebuliser at night', 'We cook on a wood chulha in winter', 'Two kids, school at 8, bus ride 40 minutes']) {
+  for (const note of [
+    'I walk my dog at 6 AM',
+    'My mother uses a nebuliser at night',
+    'We cook on a wood chulha in winter',
+    'Two kids, school at 8, bus ride 40 minutes',
+  ]) {
     assert.equal(looksLikeInjection(note), false, note);
   }
   assert.equal(looksLikeInjection(undefined), false);

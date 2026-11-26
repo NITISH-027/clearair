@@ -1,13 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BREATHING, HOME, KITCHEN, MASK, WHO_24H_GUIDELINE, exposureDetail, exposureDose, indoorConcentration, percentReduction } from '../shared/exposure.js';
+import { BREATHING, HOME, KITCHEN, MASK, WHO_24H_GUIDELINE } from '../shared/constants.js';
+import { exposureDetail, indoorConcentration, percentReduction } from '../shared/exposure.js';
+
+const exposureDose = (ctx, flags) => exposureDetail(ctx, flags).dose;
 import { validateProfile } from '../shared/validate.js';
 import { buildPlan } from '../shared/planner.js';
 
-const profile = (over = {}) => validateProfile({
-  household: {}, commute: { mode: 'twowheeler', hours: 1.5 }, exercise: { outdoorHours: 1 },
-  home: { windows: 'open', purifier: false, cooking: 'lpg' }, ...over,
-}).value;
+const profile = (over = {}) =>
+  validateProfile({
+    household: {},
+    commute: { mode: 'twowheeler', hours: 1.5 },
+    exercise: { outdoorHours: 1 },
+    home: { windows: 'open', purifier: false, cooking: 'lpg' },
+    ...over,
+  }).value;
 
 test('indoorConcentration matches the mass-balance equation by hand', () => {
   // C_in = P a C_out / (a + k) with no source and no purifier
@@ -27,11 +34,18 @@ test('a bigger CADR always means cleaner indoor air', () => {
 });
 
 test('tighter homes have lower indoor concentration than leaky ones', () => {
-  assert.ok(indoorConcentration({ outdoor: 150, airChanges: HOME.airChanges.closed }) < indoorConcentration({ outdoor: 150, airChanges: HOME.airChanges.open }));
+  assert.ok(
+    indoorConcentration({ outdoor: 150, airChanges: HOME.airChanges.closed }) <
+      indoorConcentration({ outdoor: 150, airChanges: HOME.airChanges.open }),
+  );
 });
 
 test('dose is concentration x breathing rate x hours, summed', () => {
-  const p = profile({ commute: { mode: 'wfh', hours: 0 }, exercise: { outdoorHours: 0 }, home: { windows: 'closed', cooking: 'induction' } });
+  const p = profile({
+    commute: { mode: 'wfh', hours: 0 },
+    exercise: { outdoorHours: 0 },
+    home: { windows: 'closed', cooking: 'induction' },
+  });
   const cIn = indoorConcentration({ outdoor: 100, airChanges: HOME.airChanges.closed });
   const inc = KITCHEN.emission.induction / (KITCHEN.volume * (KITCHEN.airChanges.normal + HOME.deposition));
   const expected = cIn * BREATHING.sleep * 8 + (cIn + inc) * BREATHING.light * 2 + cIn * BREATHING.rest * 14;
@@ -87,7 +101,11 @@ test('exercising in the cleanest window or indoors lowers dose; both never raise
 });
 
 test('unknown modes and cooking fuels degrade safely instead of throwing', () => {
-  const odd = { ...profile(), commute: { mode: 'hoverboard', hours: 1 }, home: { windows: 'open', purifier: false, purifierCadr: 0, cooking: 'unknown' } };
+  const odd = {
+    ...profile(),
+    commute: { mode: 'hoverboard', hours: 1 },
+    home: { windows: 'open', purifier: false, purifierCadr: 0, cooking: 'unknown' },
+  };
   assert.ok(Number.isFinite(exposureDose({ pm25: 50, profile: odd })));
 });
 

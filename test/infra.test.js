@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { TtlCache } from '../server/cache.js';
 import { RateLimiter } from '../server/ratelimit.js';
 import { backoffDelay, withRetry } from '../server/retry.js';
-import { UpstreamError, fetchJson, fetchJsonWithRetry } from '../server/upstream.js';
-import { corsHeaders, parseAllowedOrigins, clientKey, HttpError } from '../server/http.js';
+import { fetchJson, fetchJsonWithRetry } from '../server/upstream.js';
+import { HttpError, UpstreamError } from '../server/errors.js';
+import { corsHeaders, parseAllowedOrigins, clientKey } from '../server/security.js';
 import { pickHourly } from '../server/air.js';
 import { json, timeoutError } from './helpers.js';
 
@@ -23,7 +24,11 @@ test('TtlCache expires entries and bounds its size', () => {
 test('TtlCache.getOrLoad shares one in-flight load and caches the result', async () => {
   const cache = new TtlCache(60_000, 10);
   let calls = 0;
-  const loader = async () => { calls += 1; await new Promise((r) => setTimeout(r, 10)); return { n: calls }; };
+  const loader = async () => {
+    calls += 1;
+    await new Promise((r) => setTimeout(r, 10));
+    return { n: calls };
+  };
   const [a, b] = await Promise.all([cache.getOrLoad('k', loader), cache.getOrLoad('k', loader)]);
   assert.equal(a, b);
   assert.equal(await cache.getOrLoad('k', loader), a);
@@ -33,11 +38,18 @@ test('TtlCache.getOrLoad shares one in-flight load and caches the result', async
 test('TtlCache.getOrLoad can refuse to cache degraded results and clears pending on error', async () => {
   const cache = new TtlCache(60_000, 10);
   let calls = 0;
-  const loader = async () => { calls += 1; return { ok: false }; };
+  const loader = async () => {
+    calls += 1;
+    return { ok: false };
+  };
   await cache.getOrLoad('k', loader, (v) => v.ok);
   await cache.getOrLoad('k', loader, (v) => v.ok);
   assert.equal(calls, 2);
-  await assert.rejects(cache.getOrLoad('boom', async () => { throw new Error('x'); }));
+  await assert.rejects(
+    cache.getOrLoad('boom', async () => {
+      throw new Error('x');
+    }),
+  );
   assert.equal(cache.pending.size, 0);
   assert.equal(await cache.getOrLoad('boom', async () => 5), 5);
 });
@@ -61,34 +73,85 @@ test('RateLimiter prunes expired keys and never grows without bound', () => {
 });
 
 test('backoffDelay doubles, caps and jitters', () => {
-  assert.deepEqual([0, 1, 2, 3, 4].map((i) => backoffDelay(i, { random: () => 1 })), [300, 600, 1200, 2000, 2000]);
+  assert.deepEqual(
+    [0, 1, 2, 3, 4].map((i) => backoffDelay(i, { random: () => 1 })),
+    [300, 600, 1200, 2000, 2000],
+  );
   assert.equal(backoffDelay(0, { random: () => 0 }), 150);
 });
 
 test('withRetry stops on non-retryable errors and rethrows the last error', async () => {
   let calls = 0;
-  await assert.rejects(withRetry(async () => { calls += 1; throw new Error('fatal'); }, { isRetryable: () => false, sleep: async () => {} }), /fatal/);
+  await assert.rejects(
+    withRetry(
+      async () => {
+        calls += 1;
+        throw new Error('fatal');
+      },
+      { isRetryable: () => false, sleep: async () => {} },
+    ),
+    /fatal/,
+  );
   assert.equal(calls, 1);
   calls = 0;
-  await assert.rejects(withRetry(async () => { calls += 1; throw new Error(`n${calls}`); }, { attempts: 3, sleep: async () => {} }), /n3/);
+  await assert.rejects(
+    withRetry(
+      async () => {
+        calls += 1;
+        throw new Error(`n${calls}`);
+      },
+      { attempts: 3, sleep: async () => {} },
+    ),
+    /n3/,
+  );
   assert.equal(calls, 3);
   assert.equal(await withRetry(async (i) => i, { sleep: async () => {} }), 0);
 });
 
 test('fetchJson classifies timeouts, network errors, status errors and bad bodies', async () => {
-  await assert.rejects(fetchJson(async () => { throw timeoutError(); }, 'http://x'), (e) => e.kind === 'timeout' && e.retryable);
-  await assert.rejects(fetchJson(async () => { throw new Error('down'); }, 'http://x'), (e) => e.kind === 'network' && e.retryable);
-  await assert.rejects(fetchJson(async () => json({}, false, 404), 'http://x'), (e) => e.kind === 'status' && !e.retryable);
-  await assert.rejects(fetchJson(async () => json({}, false, 503), 'http://x'), (e) => e.retryable);
-  await assert.rejects(fetchJson(async () => ({ ok: true, json: async () => { throw new Error('x'); } }), 'http://x'), (e) => e.kind === 'parse' && !e.retryable);
+  await assert.rejects(
+    fetchJson(async () => {
+      throw timeoutError();
+    }, 'http://x'),
+    (e) => e.kind === 'timeout' && e.retryable,
+  );
+  await assert.rejects(
+    fetchJson(async () => {
+      throw new Error('down');
+    }, 'http://x'),
+    (e) => e.kind === 'network' && e.retryable,
+  );
+  await assert.rejects(
+    fetchJson(async () => json({}, false, 404), 'http://x'),
+    (e) => e.kind === 'status' && !e.retryable,
+  );
+  await assert.rejects(
+    fetchJson(async () => json({}, false, 503), 'http://x'),
+    (e) => e.retryable,
+  );
+  await assert.rejects(
+    fetchJson(
+      async () => ({
+        ok: true,
+        json: async () => {
+          throw new Error('x');
+        },
+      }),
+      'http://x',
+    ),
+    (e) => e.kind === 'parse' && !e.retryable,
+  );
   assert.deepEqual(await fetchJson(async () => json({ a: 1 }), 'http://x'), { a: 1 });
   assert.ok(new UpstreamError('status', 429).retryable);
 });
 
 test('fetchJsonWithRetry retries once by default then gives up', async () => {
   let calls = 0;
-  const impl = async () => { calls += 1; return json({}, false, 503); };
-  await assert.rejects(fetchJsonWithRetry(impl, 'http://x', {}, { sleep: async () => {}, random: () => 1 }));
+  const impl = async () => {
+    calls += 1;
+    return json({}, false, 503);
+  };
+  await assert.rejects(fetchJsonWithRetry(impl, 'http://x', { sleep: async () => {}, random: () => 1 }));
   assert.equal(calls, 2);
 });
 
@@ -111,8 +174,14 @@ test('corsHeaders allows same-origin and listed origins and rejects others', () 
   const allow = parseAllowedOrigins('https://app.example');
   assert.deepEqual(corsHeaders({ headers: {} }, allow), {});
   assert.deepEqual(corsHeaders({ headers: { origin: 'http://h:1', host: 'h:1' } }, allow), {});
-  assert.equal(corsHeaders({ headers: { origin: 'https://app.example', host: 'h:1' } }, allow)['Access-Control-Allow-Origin'], 'https://app.example');
-  assert.throws(() => corsHeaders({ headers: { origin: 'https://evil.example', host: 'h:1' } }, allow), (e) => e instanceof HttpError && e.status === 403);
+  assert.equal(
+    corsHeaders({ headers: { origin: 'https://app.example', host: 'h:1' } }, allow)['Access-Control-Allow-Origin'],
+    'https://app.example',
+  );
+  assert.throws(
+    () => corsHeaders({ headers: { origin: 'https://evil.example', host: 'h:1' } }, allow),
+    (e) => e instanceof HttpError && e.status === 403,
+  );
   assert.throws(() => corsHeaders({ headers: { origin: 'null', host: 'h:1' } }, allow), HttpError);
 });
 
@@ -126,7 +195,15 @@ test('clientKey trusts X-Forwarded-For only behind a proxy', () => {
 test('withRetry uses a real timer by default', async () => {
   let calls = 0;
   const started = Date.now();
-  await assert.rejects(withRetry(async () => { calls += 1; throw new Error('x'); }, { attempts: 2, baseMs: 2, maxMs: 2 }));
+  await assert.rejects(
+    withRetry(
+      async () => {
+        calls += 1;
+        throw new Error('x');
+      },
+      { attempts: 2, baseMs: 2, maxMs: 2 },
+    ),
+  );
   assert.equal(calls, 2);
   assert.ok(Date.now() - started >= 1);
 });

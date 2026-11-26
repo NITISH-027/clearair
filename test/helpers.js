@@ -1,6 +1,17 @@
+process.env.LOG_LEVEL ??= 'silent';
 import { createServer } from '../server/app.js';
 
 export const json = (data, ok = true, status = ok ? 200 : 500) => ({ ok, status, json: async () => data });
+
+/**
+ * Pick the handler for a call. An array handler is consumed one call at a time; the last entry repeats.
+ */
+function nextHandler(queues, match, handler) {
+  if (!Array.isArray(handler)) return handler;
+  if (!queues.has(match)) queues.set(match, [...handler]);
+  const queue = queues.get(match);
+  return queue.length > 1 ? queue.shift() : queue[0];
+}
 
 /** Fake fetch. A handler may be a response, a function, or an array consumed one call at a time. */
 export function fakeFetch(handlers) {
@@ -8,19 +19,12 @@ export function fakeFetch(handlers) {
   const queues = new Map();
   const impl = async (url, init) => {
     calls.push({ url: String(url), init });
-    for (const [match, handler] of handlers) {
-      if (!String(url).includes(match)) continue;
-      let h = handler;
-      if (Array.isArray(handler)) {
-        if (!queues.has(match)) queues.set(match, [...handler]);
-        const queue = queues.get(match);
-        h = queue.length > 1 ? queue.shift() : queue[0];
-      }
-      if (typeof h === 'function') return h(url, init);
-      if (h instanceof Error) throw h;
-      return h;
-    }
-    return json({}, false, 404);
+    const hit = handlers.find(([match]) => String(url).includes(match));
+    if (!hit) return json({}, false, 404);
+    const h = nextHandler(queues, hit[0], hit[1]);
+    if (typeof h === 'function') return h(url, init);
+    if (h instanceof Error) throw h;
+    return h;
   };
   impl.calls = calls;
   impl.callsTo = (match) => calls.filter((c) => c.url.includes(match));
@@ -52,16 +56,40 @@ export const air = json({ current: { time: '2026-11-26T08:00', us_aqi: 160, pm2_
 export const goodAiPlan = {
   summary: 'Air is unhealthy today, so keep exposure low by staying in during the dirtiest hours and cleaning your indoor air.',
   steps: [
-    { title: 'Wear an N95 on the commute', action: 'Wear a fitted N95 on your scooter ride to work today.', why: 'It filters most fine particles you would breathe in traffic.', when: 'morning', category: 'routine' },
-    { title: 'Keep windows closed', action: 'Close windows and doors until the afternoon window.', why: 'Fewer outdoor particles leak into the rooms where your family spends time.', when: 'daytime', category: 'indoor' },
-    { title: 'Switch the engine off when waiting', action: 'Turn the engine off at long signals and while waiting.', why: 'Less idling exhaust adds to the shared street air.', when: 'anytime', category: 'swap' },
+    {
+      title: 'Wear an N95 on the commute',
+      action: 'Wear a fitted N95 on your scooter ride to work today.',
+      why: 'It filters most fine particles you would breathe in traffic.',
+      when: 'morning',
+      category: 'routine',
+    },
+    {
+      title: 'Keep windows closed',
+      action: 'Close windows and doors until the afternoon window.',
+      why: 'Fewer outdoor particles leak into the rooms where your family spends time.',
+      when: 'daytime',
+      category: 'indoor',
+    },
+    {
+      title: 'Switch the engine off when waiting',
+      action: 'Turn the engine off at long signals and while waiting.',
+      why: 'Less idling exhaust adds to the shared street air.',
+      when: 'anytime',
+      category: 'swap',
+    },
   ],
 };
 
 /** Gemini generateContent response in the documented live shape. */
 export const geminiReply = (plan = goodAiPlan) =>
   json({
-    candidates: [{ content: { role: 'model', parts: [{ text: typeof plan === 'string' ? plan : JSON.stringify(plan) }] }, finishReason: 'STOP', index: 0 }],
+    candidates: [
+      {
+        content: { role: 'model', parts: [{ text: typeof plan === 'string' ? plan : JSON.stringify(plan) }] },
+        finishReason: 'STOP',
+        index: 0,
+      },
+    ],
     usageMetadata: { promptTokenCount: 500, candidatesTokenCount: 300, totalTokenCount: 800 },
     modelVersion: 'gemini-3.8-flash',
   });
@@ -76,7 +104,13 @@ export const profileBody = (over = {}) => ({
 
 export async function withServer(opts, fn) {
   const slept = [];
-  const server = createServer({ sleep: async (ms) => { slept.push(ms); }, random: () => 1, ...opts });
+  const server = createServer({
+    sleep: async (ms) => {
+      slept.push(ms);
+    },
+    random: () => 1,
+    ...opts,
+  });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   try {

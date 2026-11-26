@@ -1,0 +1,7 @@
+node_modules
+coverage
+package-lock.json
+public/img
+*.md
+public/index.html
+public/styles.css

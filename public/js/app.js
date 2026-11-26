@@ -1,32 +1,51 @@
+/**
+ * Page controller: wires the form to the API and shows the results.
+ */
 import { validateCity, validateProfile, validateAqi } from '/shared/validate.js';
 import { fetchConfig, fetchPlan } from './api.js';
 import { renderResults } from './render.js';
-import { clear } from './dom.js';
+import { byId, clear } from './dom.js';
+import { readProfile, restoreForm, saveForm } from './form-state.js';
 
-const form = document.getElementById('plan-form');
-const statusEl = document.getElementById('status');
-const results = document.getElementById('results');
-const resultsBody = document.getElementById('results-body');
-const submitBtn = document.getElementById('submit');
-const locateBtn = document.getElementById('locate');
-const cityInput = document.getElementById('city');
-const cityError = document.getElementById('city-error');
-const aqiInput = document.getElementById('manual-aqi');
-const aqiError = document.getElementById('aqi-error');
-const routineError = document.getElementById('routine-error');
-const cadrField = document.getElementById('cadr-field');
-const cadrError = document.getElementById('cadr-error');
-const notesInput = document.getElementById('notes');
-const notesCount = document.getElementById('notes-count');
-const aiToggle = document.getElementById('ai-toggle');
+const FIX_FIELD_MESSAGE = 'Please fix the highlighted field.';
 
-const STORAGE_KEY = 'clearair.profile.v2';
+const form = /** @type {import('./form-state.js').PlanForm} */ (byId('plan-form'));
+const statusEl = byId('status');
+const results = byId('results');
+const resultsBody = byId('results-body');
+const submitBtn = /** @type {HTMLButtonElement} */ (byId('submit'));
+const locateBtn = /** @type {HTMLButtonElement} */ (byId('locate'));
+const cityInput = /** @type {HTMLInputElement} */ (byId('city'));
+const cityError = byId('city-error');
+const aqiInput = /** @type {HTMLInputElement} */ (byId('manual-aqi'));
+const aqiError = byId('aqi-error');
+const routineError = byId('routine-error');
+const cadrField = byId('cadr-field');
+const cadrError = byId('cadr-error');
+const notesInput = /** @type {HTMLTextAreaElement} */ (byId('notes'));
+const notesCount = byId('notes-count');
+const aiToggle = byId('ai-toggle');
 
+/**
+ * @param {unknown} err
+ * @returns {string} readable text for a caught value
+ */
+const messageOf = (err) => (err instanceof Error ? err.message : String(err));
+
+/**
+ * @param {string} message
+ * @param {boolean} [isError]
+ */
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
   statusEl.classList.toggle('is-error', isError);
 }
 
+/**
+ * @param {HTMLElement} node
+ * @param {HTMLElement|null} input
+ * @param {string} [message]
+ */
 function showError(node, input, message) {
   node.textContent = message ?? '';
   node.hidden = !message;
@@ -34,53 +53,6 @@ function showError(node, input, message) {
     if (message) input.setAttribute('aria-invalid', 'true');
     else input.removeAttribute('aria-invalid');
   }
-}
-
-function readProfile() {
-  const data = new FormData(form);
-  return {
-    household: {
-      children: data.has('children'),
-      elderly: data.has('elderly'),
-      respiratory: data.has('respiratory'),
-      pregnant: data.has('pregnant'),
-    },
-    commute: { mode: data.get('mode'), hours: data.get('commuteHours') },
-    exercise: { outdoorHours: data.get('exerciseHours') },
-    home: { windows: data.get('windows'), purifier: data.has('purifier'), purifierCadr: data.get('cadr'), cooking: data.get('cooking') },
-  };
-}
-
-function saveForm() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ city: cityInput.value, profile: readProfile() }));
-  } catch {
-    /* storage can be blocked; the app works without it */
-  }
-}
-
-function restoreForm() {
-  let saved;
-  try {
-    saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
-  } catch {
-    return;
-  }
-  const check = validateProfile(saved?.profile);
-  if (!check.ok) return;
-  const p = check.value;
-  if (typeof saved.city === 'string' && validateCity(saved.city).ok) cityInput.value = saved.city;
-  form.elements.namedItem('children').checked = p.household.children;
-  form.elements.namedItem('elderly').checked = p.household.elderly;
-  form.elements.namedItem('respiratory').checked = p.household.respiratory;
-  form.elements.namedItem('pregnant').checked = p.household.pregnant;
-  form.elements.mode.value = p.commute.mode;
-  form.elements.commuteHours.value = String(p.commute.hours);
-  form.elements.exerciseHours.value = String(p.exercise.outdoorHours);
-  form.elements.cooking.value = p.home.cooking;
-  form.elements.windows.value = p.home.windows;
-  form.elements.purifier.checked = p.home.purifier;
-  if (p.home.purifier) form.elements.cadr.value = String(p.home.purifierCadr);
 }
 
 function syncRoutine() {
@@ -93,6 +65,7 @@ function syncPurifier() {
   cadrField.hidden = !form.elements.purifier.checked;
 }
 
+/** @param {import('/shared/types.js').PlanResponse} result */
 function show(result) {
   document.body.dataset.level = String(result.plan.level);
   clear(resultsBody);
@@ -102,15 +75,18 @@ function show(result) {
   results.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-/** Validate the form and send `where` ({city} | {lat, lon} | {aqi}) with the profile. */
+/**
+ * Validate the form and send `where` ({city} | {lat, lon} | {aqi}) with the profile.
+ * @param {Record<string, unknown>} where
+ */
 async function run(where) {
   routineError.hidden = true;
   showError(cadrError, null, '');
-  const profile = validateProfile(readProfile());
+  const profile = validateProfile(readProfile(form));
   if (!profile.ok) {
     const message = profile.errors[0];
     showError(message.startsWith('Purifier') ? cadrError : routineError, null, message);
-    setStatus('Please fix the highlighted field.', true);
+    setStatus(FIX_FIELD_MESSAGE, true);
     return;
   }
   submitBtn.disabled = true;
@@ -126,11 +102,11 @@ async function run(where) {
       useAi,
     });
     show(result);
-    saveForm();
+    saveForm({ form, cityInput });
     const where2 = result.air.place ? result.air.place.name : 'your reading';
     setStatus(`Plan ready for ${where2}. AQI ${result.plan.aqi}, ${result.plan.category}.`);
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(messageOf(err), true);
   } finally {
     submitBtn.disabled = false;
     locateBtn.disabled = false;
@@ -147,7 +123,7 @@ form.addEventListener('submit', (event) => {
     if (!aqi.ok) {
       showError(aqiError, aqiInput, aqi.error);
       aqiInput.focus();
-      setStatus('Please fix the highlighted field.', true);
+      setStatus(FIX_FIELD_MESSAGE, true);
       return;
     }
     run({ aqi: aqi.value });
@@ -157,7 +133,7 @@ form.addEventListener('submit', (event) => {
   if (!city.ok) {
     showError(cityError, cityInput, city.error);
     cityInput.focus();
-    setStatus('Please fix the highlighted field.', true);
+    setStatus(FIX_FIELD_MESSAGE, true);
     return;
   }
   run({ city: city.value });
@@ -182,7 +158,7 @@ notesInput.addEventListener('input', () => {
   notesCount.textContent = String(notesInput.value.length);
 });
 
-restoreForm();
+restoreForm({ form, cityInput });
 syncRoutine();
 syncPurifier();
 notesCount.textContent = String(notesInput.value.length);

@@ -3,6 +3,11 @@
 
 const TIMEOUT_MS = 100000; // the server may retry the AI service with backoff
 
+/**
+ * @param {string} url
+ * @param {RequestInit} [init]
+ * @returns {Promise<any>} the parsed JSON body
+ */
 async function request(url, init = {}) {
   let response;
   try {
@@ -28,7 +33,11 @@ export async function fetchConfig() {
   }
 }
 
-/** POST /api/plan with { city | lat+lon | aqi, profile, notes?, useAi? }. */
+/**
+ * POST /api/plan with { city | lat+lon | aqi, profile, notes?, useAi? }.
+ * @param {Record<string, unknown>} payload
+ * @returns {Promise<import('/shared/types.js').PlanResponse>}
+ */
 export function fetchPlan(payload) {
   return request('/api/plan', {
     method: 'POST',

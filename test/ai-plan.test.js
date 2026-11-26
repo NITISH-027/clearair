@@ -1,15 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  AiError, RESPONSE_SCHEMA, aiCacheKey, buildFacts, buildPrompt, generateAiPlan, parseModelJson, validateAiPlan,
-} from '../server/ai-plan.js';
+import { RESPONSE_SCHEMA } from '../server/ai-config.js';
+import { generateAiPlan } from '../server/ai-plan.js';
+import { aiCacheKey, buildFacts, buildPrompt } from '../server/ai-prompt.js';
+import { parseModelJson, validateAiPlan } from '../server/ai-validate.js';
+import { AiError } from '../server/errors.js';
 import { buildPlan } from '../shared/planner.js';
 import { validateProfile } from '../shared/validate.js';
 import { fakeFetch, geminiReply, goodAiPlan, json, timeoutError } from './helpers.js';
 
 const env = { GEMINI_API_KEY: 'test-key-123' };
-const profile = validateProfile({ household: { children: true }, commute: { mode: 'car', hours: 1 }, exercise: { outdoorHours: 1 }, home: { cooking: 'biomass' } }).value;
-const air = { place: { name: 'Delhi', country: 'India' }, current: { aqi: 210, pm25: 130 }, hourly: [{ time: '2026-11-26T09:00', aqi: 210, pm25: 130 }, { time: '2026-11-26T14:00', aqi: 120, pm25: 45 }] };
+const profile = validateProfile({
+  household: { children: true },
+  commute: { mode: 'car', hours: 1 },
+  exercise: { outdoorHours: 1 },
+  home: { cooking: 'biomass' },
+}).value;
+const air = {
+  place: { name: 'Delhi', country: 'India' },
+  current: { aqi: 210, pm25: 130 },
+  hourly: [
+    { time: '2026-11-26T09:00', aqi: 210, pm25: 130 },
+    { time: '2026-11-26T14:00', aqi: 120, pm25: 45 },
+  ],
+};
 const plan = buildPlan(profile, { aqi: 210, pm25: 130, hourly: air.hourly, source: 'live' });
 const facts = buildFacts({ plan, air, profile });
 const noSleep = async () => {};
@@ -24,7 +38,11 @@ test('parseModelJson accepts clean JSON, fences, surrounding prose and trailing 
 
 test('parseModelJson rejects garbage, arrays and empty output', () => {
   for (const bad of ['', '   ', 'not json at all', '[1,2,3]', '{"a":', null, undefined, 42, '"just a string"']) {
-    assert.throws(() => parseModelJson(bad), (err) => err instanceof AiError && err.code === 'invalid_output', String(bad));
+    assert.throws(
+      () => parseModelJson(bad),
+      (err) => err instanceof AiError && err.code === 'invalid_output',
+      String(bad),
+    );
   }
 });
 
@@ -51,7 +69,11 @@ test('validateAiPlan rejects wrong shapes, short text and bad enums', () => {
 test('validateAiPlan strips links and markup from model text and caps steps at 10', () => {
   const dirty = {
     summary: 'Read https://evil.example/phish and <script>alert(1)</script> then stay inside today.',
-    steps: Array.from({ length: 14 }, (_, i) => ({ ...goodAiPlan.steps[0], title: `Step ${i} <b>bold</b>`, action: 'Visit www.evil.example now and wear a mask outdoors.' })),
+    steps: Array.from({ length: 14 }, (_, i) => ({
+      ...goodAiPlan.steps[0],
+      title: `Step ${i} <b>bold</b>`,
+      action: 'Visit www.evil.example now and wear a mask outdoors.',
+    })),
   };
   const result = validateAiPlan(dirty);
   assert.equal(result.ok, true);
@@ -110,20 +132,38 @@ test('generateAiPlan honours GEMINI_MODEL and rejects unsafe model names', async
   const f = fakeFetch([['generateContent', geminiReply()]]);
   await generateAiPlan({ fetchImpl: f, env: { ...env, GEMINI_MODEL: 'gemini-9.9-pro' }, facts, notes: '', sleep: noSleep });
   assert.match(f.calls[0].url, /gemini-9\.9-pro:generateContent/);
-  await assert.rejects(generateAiPlan({ fetchImpl: f, env: { ...env, GEMINI_MODEL: '../evil?x=' }, facts, notes: '', sleep: noSleep }), (e) => e.code === 'api_error');
+  await assert.rejects(
+    generateAiPlan({ fetchImpl: f, env: { ...env, GEMINI_MODEL: '../evil?x=' }, facts, notes: '', sleep: noSleep }),
+    (e) => e.code === 'api_error',
+  );
 });
 
 test('generateAiPlan retries 503 with exponential backoff, then succeeds', async () => {
   const f = fakeFetch([['generateContent', [json({}, false, 503), json({}, false, 429), geminiReply()]]]);
   const delays = [];
-  const result = await generateAiPlan({ fetchImpl: f, env, facts, notes: '', attempts: 3, sleep: async (ms) => { delays.push(ms); }, random: () => 1 });
+  const result = await generateAiPlan({
+    fetchImpl: f,
+    env,
+    facts,
+    notes: '',
+    attempts: 3,
+    sleep: async (ms) => {
+      delays.push(ms);
+    },
+    random: () => 1,
+  });
   assert.equal(result.steps.length, 3);
   assert.equal(f.calls.length, 3);
   assert.deepEqual(delays, [300, 600]);
 });
 
 test('generateAiPlan recovers from malformed JSON on a later attempt', async () => {
-  const f = fakeFetch([['generateContent', [geminiReply('this is not json'), geminiReply('{"summary": "x"}'), geminiReply('```json\n' + JSON.stringify(goodAiPlan) + '\n```')]]]);
+  const f = fakeFetch([
+    [
+      'generateContent',
+      [geminiReply('this is not json'), geminiReply('{"summary": "x"}'), geminiReply('```json\n' + JSON.stringify(goodAiPlan) + '\n```')],
+    ],
+  ]);
   const result = await generateAiPlan({ fetchImpl: f, env, facts, notes: '', attempts: 3, sleep: noSleep });
   assert.equal(result.steps.length, 3);
   assert.equal(f.calls.length, 3);
@@ -131,7 +171,10 @@ test('generateAiPlan recovers from malformed JSON on a later attempt', async () 
 
 test('generateAiPlan gives up with invalid_output after repeated bad answers', async () => {
   const f = fakeFetch([['generateContent', geminiReply('{"summary":"nope"}')]]);
-  await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', attempts: 3, sleep: noSleep }), (e) => e instanceof AiError && e.code === 'invalid_output');
+  await assert.rejects(
+    generateAiPlan({ fetchImpl: f, env, facts, notes: '', attempts: 3, sleep: noSleep }),
+    (e) => e instanceof AiError && e.code === 'invalid_output',
+  );
   assert.equal(f.calls.length, 3);
 });
 
@@ -150,7 +193,10 @@ test('generateAiPlan does not retry auth or bad-request errors', async () => {
 });
 
 test('generateAiPlan treats blocked or empty candidates as invalid output', async () => {
-  const blocked = json({ promptFeedback: { blockReason: 'SAFETY' }, candidates: [{ content: { parts: [{ text: JSON.stringify(goodAiPlan) }] } }] });
+  const blocked = json({
+    promptFeedback: { blockReason: 'SAFETY' },
+    candidates: [{ content: { parts: [{ text: JSON.stringify(goodAiPlan) }] } }],
+  });
   const empty = json({ candidates: [] });
   const noParts = json({ candidates: [{ content: {} }] });
   for (const reply of [blocked, empty, noParts]) {
@@ -169,20 +215,43 @@ test('generateAiPlan joins multi-part replies and ignores non-text parts', async
 test('generateAiPlan survives a network failure and an unparsable body', async () => {
   const net = fakeFetch([['generateContent', new Error('socket hang up')]]);
   await assert.rejects(generateAiPlan({ fetchImpl: net, env, facts, notes: '', sleep: noSleep }), (e) => e.code === 'api_error');
-  const bad = fakeFetch([['generateContent', { ok: true, status: 200, json: async () => { throw new Error('bad'); } }]]);
+  const bad = fakeFetch([
+    [
+      'generateContent',
+      {
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new Error('bad');
+        },
+      },
+    ],
+  ]);
   await assert.rejects(generateAiPlan({ fetchImpl: bad, env, facts, notes: '', sleep: noSleep }), (e) => e.code === 'api_error');
 });
 
 test('an HTTP error surfaces the status and Google message as detail, never the key', async () => {
   const fetchImpl = async () => ({ ok: false, status: 404, json: async () => ({ error: { message: 'models/nope is not found' } }) });
   await assert.rejects(
-    generateAiPlan({ fetchImpl, env: { GEMINI_API_KEY: 'SECRET-KEY-123', GEMINI_MODEL: 'nope' }, facts: {}, notes: '', sleep: async () => {} }),
+    generateAiPlan({
+      fetchImpl,
+      env: { GEMINI_API_KEY: 'SECRET-KEY-123', GEMINI_MODEL: 'nope' },
+      facts: {},
+      notes: '',
+      sleep: async () => {},
+    }),
     (err) => err.code === 'api_error' && err.detail === 'HTTP 404: models/nope is not found' && !JSON.stringify(err).includes('SECRET'),
   );
 });
 
 test('an HTTP error with a non-JSON body still reports the status', async () => {
-  const fetchImpl = async () => ({ ok: false, status: 403, json: async () => { throw new SyntaxError('html'); } });
+  const fetchImpl = async () => ({
+    ok: false,
+    status: 403,
+    json: async () => {
+      throw new SyntaxError('html');
+    },
+  });
   await assert.rejects(
     generateAiPlan({ fetchImpl, env: { GEMINI_API_KEY: 'k' }, facts: {}, notes: '', sleep: async () => {} }),
     (err) => err.detail === 'HTTP 403',
@@ -204,18 +273,26 @@ test('a 404 on the chosen model tries the fallback models in order', async () =>
 test('a 404 on every model ends as api_error with the last detail', async () => {
   const fetchImpl = async () => ({ ok: false, status: 404, json: async () => ({ error: { message: 'gone' } }) });
   await assert.rejects(
-    generateAiPlan({ fetchImpl, env: { GEMINI_API_KEY: 'k', GEMINI_MODEL: 'gemini-flash-latest' }, facts: {}, notes: '', sleep: async () => {} }),
+    generateAiPlan({
+      fetchImpl,
+      env: { GEMINI_API_KEY: 'k', GEMINI_MODEL: 'gemini-flash-latest' },
+      facts: {},
+      notes: '',
+      sleep: async () => {},
+    }),
     (err) => err.code === 'api_error' && err.detail === 'HTTP 404: gone',
   );
 });
 
 test('a non-404 error does not move on to another model', async () => {
   let calls = 0;
-  const fetchImpl = async () => { calls += 1; return { ok: false, status: 403, json: async () => ({}) }; };
+  const fetchImpl = async () => {
+    calls += 1;
+    return { ok: false, status: 403, json: async () => ({}) };
+  };
   await assert.rejects(generateAiPlan({ fetchImpl, env: { GEMINI_API_KEY: 'k' }, facts: {}, notes: '', sleep: async () => {} }));
   assert.equal(calls, 1);
 });
-
 
 test('a hung model times out once and the next model answers', async () => {
   const tried = [];
@@ -237,7 +314,10 @@ test('the total time budget stops the pipeline before any request when it is spe
 
 test('each attempt is capped by the remaining budget', async () => {
   const seen = [];
-  const fetchImpl = async (url, init) => { seen.push(init.signal); return geminiReply(); };
+  const fetchImpl = async (url, init) => {
+    seen.push(init.signal);
+    return geminiReply();
+  };
   await generateAiPlan({ fetchImpl, env, facts, notes: '', sleep: noSleep, budgetMs: 5000 });
   assert.equal(seen.length, 1);
 });
@@ -280,6 +360,9 @@ test('503 in both modes moves on to the next model', async () => {
 
 test('a 429 on every model ends as api_error', async () => {
   const f = fakeFetch([['generateContent', json({ error: { message: 'quota' } }, false, 429)]]);
-  await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', sleep: noSleep }), (e) => e.code === 'api_error' && e.detail === 'HTTP 429: quota');
+  await assert.rejects(
+    generateAiPlan({ fetchImpl: f, env, facts, notes: '', sleep: noSleep }),
+    (e) => e.code === 'api_error' && e.detail === 'HTTP 429: quota',
+  );
   assert.equal(f.calls.length, 6);
 });

@@ -1,4 +1,6 @@
-// Daily PM2.5 inhalation model.
+/**
+ * Daily PM2.5 inhalation model. Coefficients live in constants.js.
+ */
 //
 // Inhaled mass (ug/day) = sum over microenvironments i of  C_i x V_i x t_i
 //   C_i  PM2.5 concentration the person breathes in microenvironment i (ug/m3)
@@ -29,113 +31,119 @@
 // Every number below is an assumption chosen from the ranges in the sources
 // above. It is a comparison tool for choices, not a measurement of any person.
 
-export const WHO_24H_GUIDELINE = 15; // ug/m3, WHO Global Air Quality Guidelines 2021
+import { BREATHING, HOME, HOURS_PER_DAY, KITCHEN, MASK, MODES } from './constants.js';
 
-/** Representative adult inhalation rates (m3/h), ranges from EPA Exposure Factors Handbook ch. 6. */
-export const BREATHING = Object.freeze({ sleep: 0.3, rest: 0.5, light: 1.0, moderate: 2.0 });
-
-export const HOME = Object.freeze({
-  roomVolume: 40, // m3, a 15 m2 room at 2.7 m
-  airChanges: Object.freeze({ open: 2.0, closed: 0.5 }), // 1/h, windows open or shut
-  penetration: 0.8,
-  deposition: 0.2, // 1/h
-  defaultCadr: 200, // m3/h, a typical small-room HEPA unit
-  purifierCoverage: 0.7, // share of indoor hours spent in the room that has the purifier
-  sleepHours: 8,
-});
-
-export const KITCHEN = Object.freeze({
-  volume: 15, // m3
-  airChanges: Object.freeze({ normal: 5, fan: 15 }), // 1/h, with and without an exhaust fan running
-  cookingHours: 2,
-  // Emission (ug/h) calibrated so the kitchen increment matches the ranges
-  // reported for household fuels (WHO Guidelines for indoor air quality:
-  // household fuel combustion, 2014; Smith et al. 2014, Annu Rev Public Health 35:185).
-  emission: Object.freeze({ biomass: 46800, lpg: 3000, induction: 600, electric: 600 }),
-});
-
-export const MASK = Object.freeze({ assignedProtectionFactor: 5 });
+/** @typedef {import('./types.js').ExposureContext} ExposureContext */
+/** @typedef {import('./types.js').ExposureDetail} ExposureDetail */
+/** @typedef {import('./types.js').ExposureFlags} ExposureFlags */
+/** @typedef {import('./types.js').Profile} Profile */
 
 /**
- * Commute microenvironments. `ratio` is in-vehicle (or on-foot) concentration
- * relative to ambient, `rate` the inhalation rate in m3/h. Ratios are
- * assumptions informed by Kaur, Nieuwenhuijsen & Colvile 2007, Atmos Environ
- * 41:4781 (commuter exposure review).
+ * Steady-state indoor PM2.5 (ug/m3) from the mass-balance equation above.
+ * @param {{outdoor: number, airChanges: number, cadr?: number, source?: number, volume?: number}} options
+ * @returns {number}
  */
-export const MODES = Object.freeze({
-  wfh: { ratio: 0, rate: BREATHING.rest, open: false },
-  walk: { ratio: 1.0, rate: 1.2, open: true },
-  cycle: { ratio: 1.0, rate: 2.0, open: true },
-  twowheeler: { ratio: 1.1, rate: 0.9, open: true },
-  bus: { ratio: 0.9, rate: 0.7, open: true },
-  metro: { ratio: 0.7, rate: 0.9, open: false },
-  car: { ratio: 0.6, rate: 0.6, open: false },
-});
-
-/** Steady-state indoor PM2.5 (ug/m3) from the mass-balance equation above. */
 export function indoorConcentration({ outdoor, airChanges, cadr = 0, source = 0, volume = HOME.roomVolume }) {
   const loss = airChanges + HOME.deposition + cadr / volume;
   return (HOME.penetration * airChanges * outdoor + source / volume) / loss;
 }
 
 /**
- * Detailed daily exposure.
- * @param {{pm25:number, bestPm25?:number|null, profile:object}} ctx
- * @param {object} flags what-if actions: mask, windowsClosed, purifier,
- *   exerciseIndoors, shiftExercise, cleanCooking, cookingVent
- * @returns {{dose:number, volume:number, meanConcentration:number, indoorConcentration:number}}
+ * Indoor concentration for the home, blending the purifier room and the rest.
+ * @param {number} pm25
+ * @param {Profile} profile
+ * @param {ExposureFlags} flags
+ * @returns {number}
  */
-export function exposureDetail(ctx, flags = {}) {
-  const { pm25, profile } = ctx;
-  const best = Number.isFinite(ctx.bestPm25) ? ctx.bestPm25 : null;
-  const mode = MODES[profile.commute.mode] ?? MODES.wfh;
-  const commuteHours = profile.commute.hours;
-  const exerciseHours = profile.exercise.outdoorHours;
-
+function homeConcentration(pm25, profile, flags) {
   const closed = flags.windowsClosed || profile.home.windows === 'closed';
   const airChanges = closed ? HOME.airChanges.closed : HOME.airChanges.open;
-  const hasPurifier = Boolean(flags.purifier || profile.home.purifier);
-  const cadr = hasPurifier ? profile.home.purifierCadr || HOME.defaultCadr : 0;
-
   const plain = indoorConcentration({ outdoor: pm25, airChanges });
+  if (!(flags.purifier || profile.home.purifier)) return plain;
+  const cadr = profile.home.purifierCadr || HOME.defaultCadr;
   const filtered = indoorConcentration({ outdoor: pm25, airChanges, cadr });
-  const cIn = hasPurifier ? HOME.purifierCoverage * filtered + (1 - HOME.purifierCoverage) * plain : plain;
+  return HOME.purifierCoverage * filtered + (1 - HOME.purifierCoverage) * plain;
+}
 
-  let kitchenSource = KITCHEN.emission[profile.home.cooking] ?? 0;
-  if (flags.cleanCooking) kitchenSource = KITCHEN.emission.induction;
-  const kitchenAch = flags.cookingVent ? KITCHEN.airChanges.fan : KITCHEN.airChanges.normal;
-  const kitchenIncrement = kitchenSource / (KITCHEN.volume * (kitchenAch + HOME.deposition));
+/**
+ * Extra PM2.5 (ug/m3) in the kitchen while cooking.
+ * @param {Profile} profile
+ * @param {ExposureFlags} flags
+ * @returns {number}
+ */
+function kitchenIncrement(profile, flags) {
+  const source = flags.cleanCooking
+    ? KITCHEN.emission.induction
+    : (/** @type {Record<string, number>} */ (KITCHEN.emission)[profile.home.cooking] ?? 0);
+  const airChanges = flags.cookingVent ? KITCHEN.airChanges.fan : KITCHEN.airChanges.normal;
+  return source / (KITCHEN.volume * (airChanges + HOME.deposition));
+}
 
+/**
+ * Concentration breathed during outdoor exercise under the what-if flags.
+ * @param {ExposureContext} ctx
+ * @param {ExposureFlags} flags
+ * @param {number} indoor
+ * @returns {number}
+ */
+function exerciseConcentration(ctx, flags, indoor) {
+  if (flags.exerciseIndoors) return indoor;
+  const best = typeof ctx.bestPm25 === 'number' && Number.isFinite(ctx.bestPm25) ? ctx.bestPm25 : null;
+  return flags.shiftExercise && best !== null ? Math.min(ctx.pm25, best) : ctx.pm25;
+}
+
+/**
+ * One slice of the day.
+ * @param {number} conc ug/m3
+ * @param {number} rate m3/h
+ * @param {number} hours h
+ */
+const segment = (conc, rate, hours) => ({ conc, rate, hours });
+
+/**
+ * The day as time-weighted segments.
+ * @param {ExposureContext} ctx
+ * @param {ExposureFlags} flags
+ * @param {{home: number, kitchen: number}} indoor
+ */
+function daySegments(ctx, flags, indoor) {
+  const { pm25, profile } = ctx;
+  const mode = /** @type {Record<string, typeof MODES.wfh>} */ (MODES)[profile.commute.mode] ?? MODES.wfh;
+  const commuteHours = profile.commute.hours;
+  const exerciseHours = profile.exercise.outdoorHours;
   const penetration = flags.mask && mode.open ? 1 / MASK.assignedProtectionFactor : 1;
-  const parts = [];
-  const add = (conc, rate, hours) => {
-    if (hours > 0) parts.push({ conc, rate, hours });
-  };
+  const awake = HOURS_PER_DAY - HOME.sleepHours - KITCHEN.cookingHours - commuteHours - exerciseHours;
+  return [
+    segment(indoor.home, BREATHING.sleep, HOME.sleepHours),
+    segment(indoor.home + indoor.kitchen, BREATHING.light, KITCHEN.cookingHours),
+    segment(pm25 * mode.ratio * penetration, mode.rate, commuteHours),
+    segment(exerciseConcentration(ctx, flags, indoor.home), BREATHING.moderate, exerciseHours),
+    segment(indoor.home, BREATHING.rest, Math.max(0, awake)),
+  ].filter((part) => part.hours > 0);
+}
 
-  add(cIn, BREATHING.sleep, HOME.sleepHours);
-  add(cIn + kitchenIncrement, BREATHING.light, KITCHEN.cookingHours);
-  add(pm25 * mode.ratio * penetration, mode.rate, commuteHours);
-  if (flags.exerciseIndoors) {
-    add(cIn, BREATHING.moderate, exerciseHours);
-  } else {
-    const outdoor = flags.shiftExercise && best !== null ? Math.min(pm25, best) : pm25;
-    add(outdoor, BREATHING.moderate, exerciseHours);
-  }
-  const awakeIndoor = 24 - HOME.sleepHours - KITCHEN.cookingHours - commuteHours - exerciseHours;
-  add(cIn, BREATHING.rest, Math.max(0, awakeIndoor));
-
+/**
+ * Detailed daily exposure.
+ * @param {ExposureContext} ctx
+ * @param {ExposureFlags} [flags] what-if actions: mask, windowsClosed, purifier,
+ *   exerciseIndoors, shiftExercise, cleanCooking, cookingVent
+ * @returns {ExposureDetail}
+ */
+export function exposureDetail(ctx, flags = {}) {
+  const home = homeConcentration(ctx.pm25, ctx.profile, flags);
+  const parts = daySegments(ctx, flags, { home, kitchen: kitchenIncrement(ctx.profile, flags) });
   const dose = parts.reduce((sum, p) => sum + p.conc * p.rate * p.hours, 0);
   const volume = parts.reduce((sum, p) => sum + p.rate * p.hours, 0);
-  return { dose, volume, meanConcentration: volume > 0 ? dose / volume : 0, indoorConcentration: cIn };
+  return { dose, volume, meanConcentration: volume > 0 ? dose / volume : 0, indoorConcentration: home };
 }
 
-/** Daily inhaled PM2.5 mass in micrograms. */
-export function exposureDose(ctx, flags = {}) {
-  return exposureDetail(ctx, flags).dose;
-}
-
-/** Percent reduction from `before` to `after`, rounded, never negative. */
+/**
+ * Percent reduction from `before` to `after`, rounded, never negative.
+ * @param {number} before
+ * @param {number} after
+ * @returns {number}
+ */
 export function percentReduction(before, after) {
-  if (!(before > 0)) return 0;
-  return Math.max(0, Math.round(((before - after) / before) * 100));
+  if (before > 0) return Math.max(0, Math.round(((before - after) / before) * 100));
+  return 0;
 }

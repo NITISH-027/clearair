@@ -17,6 +17,19 @@ export function el(tag, attrs = {}, children = []) {
   return node;
 }
 
+/** @param {Element} node */
 export function clear(node) {
   node.replaceChildren();
+}
+
+/**
+ * Find an element that the page must contain.
+ * @template {HTMLElement} T
+ * @param {string} id
+ * @returns {T}
+ */
+export function byId(id) {
+  const node = document.getElementById(id);
+  if (!node) throw new Error(`Missing element #${id}`);
+  return /** @type {T} */ (node);
 }

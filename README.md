@@ -22,18 +22,56 @@ flowchart LR
   R --> B
 ```
 
+## Project structure
+
+```
+server.js                 process entry point (reads PORT, starts the server)
+server/
+  config.js               ports, timeouts, rate limits, cache sizes, URLs, MIME types, security headers
+  app.js                  builds the HTTP server and wires the pieces together
+  routes.js               request routing: /healthz, /api/config, /api/plan, static files
+  static.js               in-memory static file lookup and responses
+  http.js                 JSON responses and bounded JSON body reading
+  security.js             client key for rate limits, CORS allowlist
+  request.js              validation of the POST /api/plan body
+  errors.js               HttpError, ValidationError, NotFoundError, UpstreamApiError, RateLimitError, UpstreamError, AiError
+  error-handler.js        the one place errors become HTTP responses
+  logger.js               structured JSON logger (LOG_LEVEL)
+  plan-service.js         air data + rule-based plan + optional Gemini plan, with fallback
+  air.js                  Open-Meteo place lookup and air quality, cache in front
+  upstream.js, retry.js   fetch JSON with timeout, retry with backoff
+  cache.js, ratelimit.js  TTL cache with request coalescing, fixed-window limiter
+  ai-config.js            Gemini models, budgets, response schema, system prompt
+  ai-prompt.js            facts, prompt text and cache key for the model
+  ai-validate.js          parsing and strict validation of the model answer
+  ai-plan.js              Gemini calls: model order, schema and JSON-only modes, retries
+shared/                   code that runs in the browser and on the server
+  constants.js            AQI breakpoints, exposure coefficients, limits (with units and sources)
+  aqi.js                  PM2.5 <-> AQI conversion and categories
+  exposure.js             daily PM2.5 inhalation model
+  actions.js              the rule-based action catalogue
+  planner.js              builds the plan from a profile and the air data
+  validate.js, sanitize.js, util.js
+public/                   the page (index.html, styles.css, img/)
+  js/app.js               page controller
+  js/form-state.js        read, save and restore the form
+  js/api.js, dom.js       server calls, tiny DOM helper
+  js/render.js, render-forecast.js, render-method.js   results rendering
+test/                     Node test runner suites
+```
+
 ## Rubric mapping
 
 | Parameter | Where it is addressed |
 | --- | --- |
 | Problem statement alignment | Routine, indoor-air and low-emission steps; tailored by city or GPS, commute, cooking fuel, windows, purifier CADR, children, older adults, asthma, pregnancy; each step has a Why and a measured effect (`shared/planner.js`) |
-| Code quality | Small single-purpose ES modules (`server/`, `shared/`, `public/js/`), no runtime dependencies, pure planning and model code separated from I/O, JSDoc and cited formulas, ESLint with strict rules |
+| Code quality | Small single-purpose ES modules (`server/`, `shared/`, `public/js/`), no runtime dependencies, pure planning and model code separated from I/O, JSDoc and cited formulas, ESLint with strict complexity rules (complexity 8, cognitive complexity 10, 35 lines per function, depth 3, 3 parameters) plus `eslint-plugin-sonarjs`, Prettier, `tsc --checkJs` with 0 errors, structured logger and one central error handler |
 | Security | Strict CSP, CORS allowlist, per-route input validation and body cap, rate limits (plan 20/min, Gemini 8/min per client), prompt-injection defense, key only in env and header, `.env.example`, `.gitignore`, ESLint security plugin and Semgrep clean, `npm audit` 0 |
 | Efficiency | 15 min TTL caches with in-flight de-duplication for AQI fetches and identical Gemini requests, preloaded static files, no runtime dependencies, repo well under 1 MB |
-| Testing | 122 tests (unit and HTTP integration) using the Node test runner, coverage gate in CI |
+| Testing | 128 tests (unit and HTTP integration) using the Node test runner, coverage gate in CI |
 | Accessibility | Semantic landmarks, labelled fields, visible 3 px focus ring, text contrast 7:1 or better for body and muted text (measured), control borders 3:1, live region for results, reduced-motion support, decorative art hidden from screen readers, works without a mouse; axe 0 violations, Lighthouse 100 |
 
-## Gemini pipeline (`server/ai-plan.js`)
+## Gemini pipeline (`server/ai-plan.js`, with `ai-config.js`, `ai-prompt.js`, `ai-validate.js`)
 
 - Request: REST `generateContent` with `responseMimeType: application/json` and a `responseSchema`. The key is sent in the `x-goog-api-key` header, never in a URL or log. Model defaults to `gemini-3.5-flash-lite`; set `GEMINI_MODEL` to change it (`gemini-2.5-flash` and `gemini-2.5-flash-lite` are closed to new users). Schema mode comes first. If Google rejects the schema request (400) or is overloaded (5xx) after one retry, the same model is asked in JSON-only mode (schema described in the prompt) and the reply is validated by our own strict validator. If the model times out, answers 404, 429 or 5xx in both modes, the pipeline tries `gemini-3.8-flash` then `gemini-flash-latest` before falling back to the rule-based plan. Auth and bad-request errors (400, 401, 403) do not switch models (a timeout does: a hung model is skipped without a second wait).
 - Output is parsed and **strictly validated** (types, lengths, step count). Malformed output is repaired where safe (code fences, text around the JSON, trailing commas); anything that still fails validation counts as `invalid_output` and is retried, then falls back.
@@ -77,12 +115,12 @@ AQI uses the US EPA PM2.5 breakpoint table (2024 revision). PM2.5 above the top 
 npm install          # dev tools only; the app has no runtime dependencies
 export GEMINI_API_KEY=...   # macOS/Linux; omit to see the labelled rule-based plan
 npm start            # http://localhost:8080
-npm run check        # lint + tests with coverage gate
+npm run check        # lint + type check + format check + tests with coverage gate
 ```
 
 Windows PowerShell: `$env:GEMINI_API_KEY = "..."` then `npm start`. The server reads environment variables only; `.env.example` lists the names (`GEMINI_API_KEY`, `GEMINI_MODEL`, `PORT`, `TRUST_PROXY`, `ALLOWED_ORIGINS`) and is not loaded automatically.
 
-If the page shows the rule-based fallback while AI is ticked, the banner and the server log print the reason and Google's error. Run `npm run diagnose` (with `GEMINI_API_KEY` set) to see the raw failure, or `npm run diagnose:ladder` to send three requests of rising complexity (plain, JSON mode, schema) and see which one is slow; set `GEMINI_MODEL` if the model name is rejected.
+If the page shows the rule-based fallback while AI is ticked, the banner and the server log (`gemini_fallback`) print the reason and Google's error. Set `GEMINI_MODEL` if the model name is rejected.
 
 Get a free Gemini key at https://aistudio.google.com/apikey. Node 20 or newer.
 
@@ -102,16 +140,18 @@ Deploy the Dockerfile on Render or Cloud Run, set `GEMINI_API_KEY` and `TRUST_PR
 ## Quality checks
 
 ```bash
-npm run lint            # ESLint, strict rules + eslint-plugin-security: 0 errors, 0 warnings
+npm run lint            # ESLint, strict rules + eslint-plugin-security + eslint-plugin-sonarjs: 0 errors, 0 warnings
+npm run typecheck       # tsc --noEmit --allowJs --checkJs: 0 errors
+npm run format:check    # Prettier
 semgrep --config p/javascript --metrics off .   # 0 findings (68 rules)
 npm audit               # 0 vulnerabilities
-npm run test:coverage   # 122 tests; 100% lines, 97% branches, 99% functions
+npm run test:coverage   # 128 tests; 100% lines, 97.8% branches, 99.6% functions
 ```
 
-CI (`.github/workflows/ci.yml`) runs lint, `npm audit`, Semgrep, tests with coverage thresholds, and a Docker build.
+CI (`.github/workflows/ci.yml`) runs lint, type check, format check, `npm audit`, Semgrep, tests with coverage thresholds, and a Docker build.
 
 ## Known limits
 
-- The Gemini path is covered by tests with a fake fetch (valid, malformed, timeout, error, injection, model fallback) and was also run live on 26 Nov 2026 with gemini-3.5-flash-lite. Google renames models often, so set GEMINI_MODEL if the default stops working.
+- The Gemini path is covered by tests with a fake `fetch` (valid, malformed, timeout, error, injection, model fallback) and was also run live on 26 Nov 2026 with `gemini-3.5-flash-lite`. Google renames models often, so set `GEMINI_MODEL` if the default stops working.
 - Air data comes from Open-Meteo (modelled CAMS data, not a ground monitor). If it is down the API returns 502 with a clear message.
 - Rate limits and caches are in memory, per process.

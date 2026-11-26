@@ -1,13 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildPlan, findBestWindow, ACTION_CATALOG } from '../shared/planner.js';
-import { exposureDose, percentReduction } from '../shared/exposure.js';
+import { exposureDetail, percentReduction } from '../shared/exposure.js';
+
+const exposureDose = (ctx, flags) => exposureDetail(ctx, flags).dose;
 import { validateProfile } from '../shared/validate.js';
 
-const profile = (over = {}) => validateProfile({
-  household: {}, commute: { mode: 'twowheeler', hours: 1.5 }, exercise: { outdoorHours: 1 },
-  home: { windows: 'open', purifier: false, cooking: 'lpg' }, ...over,
-}).value;
+const profile = (over = {}) =>
+  validateProfile({
+    household: {},
+    commute: { mode: 'twowheeler', hours: 1.5 },
+    exercise: { outdoorHours: 1 },
+    home: { windows: 'open', purifier: false, cooking: 'lpg' },
+    ...over,
+  }).value;
 
 function hourlyDay(values, date = '2026-11-26') {
   return values.map((pm25, i) => ({ time: `${date}T${String(i).padStart(2, '0')}:00`, pm25, aqi: 100 }));
@@ -112,7 +118,10 @@ test('percentReduction guards bad input', () => {
 });
 
 test('every plan item id exists in the catalogue and has a reason', () => {
-  const plan = buildPlan(profile({ household: { children: true, elderly: true, respiratory: true, pregnant: true } }), { aqi: 250, pm25: 180 });
+  const plan = buildPlan(profile({ household: { children: true, elderly: true, respiratory: true, pregnant: true } }), {
+    aqi: 250,
+    pm25: 180,
+  });
   for (const section of plan.sections) {
     for (const item of section.items) {
       assert.ok(ACTION_CATALOG[item.id], item.id);
