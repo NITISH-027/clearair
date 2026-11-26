@@ -197,8 +197,8 @@ test('a 404 on the chosen model tries the fallback models in order', async () =>
     return geminiReply();
   };
   const result = await generateAiPlan({ fetchImpl, env: { GEMINI_API_KEY: 'k' }, facts: {}, notes: '', sleep: async () => {} });
-  assert.deepEqual(tried, ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite']);
-  assert.equal(result.model, 'gemini-2.5-flash-lite');
+  assert.deepEqual(tried, ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest']);
+  assert.equal(result.model, 'gemini-flash-latest');
 });
 
 test('a 404 on every model ends as api_error with the last detail', async () => {
@@ -233,8 +233,8 @@ test('a hung model times out once and the next model answers', async () => {
     return geminiReply();
   };
   const result = await generateAiPlan({ fetchImpl, env, facts, notes: '', sleep: noSleep });
-  assert.deepEqual(tried, ['gemini-3.8-flash', 'gemini-flash-latest']);
-  assert.equal(result.model, 'gemini-flash-latest');
+  assert.deepEqual(tried, ['gemini-3.8-flash', 'gemini-3.5-flash-lite']);
+  assert.equal(result.model, 'gemini-3.5-flash-lite');
 });
 
 test('the total time budget stops the pipeline before any request when it is spent', async () => {
@@ -258,9 +258,9 @@ test('a 503 on the chosen model is retried, then the next model answers', async 
     return tried.length <= 2 ? json({}, false, 503) : geminiReply();
   };
   const result = await generateAiPlan({ fetchImpl, env, facts, notes: '', sleep: async (ms) => { delays.push(ms); } });
-  assert.deepEqual(tried, ['gemini-3.8-flash', 'gemini-3.8-flash', 'gemini-flash-latest']);
+  assert.deepEqual(tried, ['gemini-3.8-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite']);
   assert.equal(delays.length, 1);
-  assert.equal(result.model, 'gemini-flash-latest');
+  assert.equal(result.model, 'gemini-3.5-flash-lite');
 });
 
 test('a 429 on every model ends as api_error', async () => {

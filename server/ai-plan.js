@@ -7,7 +7,7 @@ import { withRetry } from './retry.js';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 export const DEFAULT_MODEL = 'gemini-3.8-flash';
 /** Tried in order when the chosen model times out, or answers 404 (retired), 429 (quota) or 5xx (overloaded) after its own retries. */
-export const FALLBACK_MODELS = Object.freeze(['gemini-flash-latest', 'gemini-2.5-flash-lite']);
+export const FALLBACK_MODELS = Object.freeze(['gemini-3.5-flash-lite', 'gemini-flash-latest']);
 export const AI_TIMEOUT_MS = 15_000
 /** Hard cap for the whole Gemini step across every model, so the page never waits much past a minute. */
 export const AI_BUDGET_MS = 55_000;
