@@ -6,9 +6,11 @@ import { withRetry } from './retry.js';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 export const DEFAULT_MODEL = 'gemini-3.8-flash';
-/** Tried in order when the chosen model answers 404 (retired), 429 (quota) or 5xx (overloaded) after its own retries. */
+/** Tried in order when the chosen model times out, or answers 404 (retired), 429 (quota) or 5xx (overloaded) after its own retries. */
 export const FALLBACK_MODELS = Object.freeze(['gemini-flash-latest', 'gemini-2.5-flash-lite']);
-export const AI_TIMEOUT_MS = 30_000;
+export const AI_TIMEOUT_MS = 15_000
+/** Hard cap for the whole Gemini step across every model, so the page never waits much past a minute. */
+export const AI_BUDGET_MS = 55_000;
 export const AI_ATTEMPTS = 2;
 
 export const STEP_WHEN = Object.freeze(['morning', 'daytime', 'evening', 'anytime']);
@@ -196,7 +198,7 @@ export function aiCacheKey(model, facts, notes) {
  * Ask Gemini for a structured plan. Retries timeouts, 429, 5xx and malformed
  * output with exponential backoff, then throws an AiError.
  */
-export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, random, timeoutMs = AI_TIMEOUT_MS, attempts = AI_ATTEMPTS }) {
+export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, random, timeoutMs = AI_TIMEOUT_MS, attempts = AI_ATTEMPTS, budgetMs = AI_BUDGET_MS }) {
   const primary = env.GEMINI_MODEL || DEFAULT_MODEL;
   if (!MODEL_NAME.test(primary)) throw new AiError('api_error', 'invalid model name');
   const { system, user } = buildPrompt(facts, notes);
@@ -213,6 +215,7 @@ export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, rand
   });
   const init = { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY }, body };
 
+  const deadline = Date.now() + budgetMs;
   const models = [primary, ...FALLBACK_MODELS.filter((m) => m !== primary)];
   let lastError;
   for (const model of models) {
@@ -228,7 +231,9 @@ export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, rand
   async function callModel(model) {
     const plan = await withRetry(
       async () => {
-        const data = await fetchJson(fetchImpl, `${GEMINI_BASE}/${model}:generateContent`, init, timeoutMs);
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new UpstreamError('timeout');
+        const data = await fetchJson(fetchImpl, `${GEMINI_BASE}/${model}:generateContent`, init, Math.min(timeoutMs, remaining));
         const checked = validateAiPlan(parseModelJson(extractText(data)));
         if (!checked.ok) throw new AiError('invalid_output');
         return checked.value;
@@ -237,7 +242,7 @@ export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, rand
         attempts,
         sleep,
         random,
-        isRetryable: (err) => (err instanceof UpstreamError && err.retryable) || (err instanceof AiError && err.code === 'invalid_output'),
+        isRetryable: (err) => (err instanceof UpstreamError && err.kind !== 'timeout' && err.retryable) || (err instanceof AiError && err.code === 'invalid_output'),
       },
     );
     return { ...plan, model };
@@ -255,7 +260,9 @@ function thinkingConfig(env) {
 }
 
 function shouldTryNextModel(err) {
-  return err instanceof UpstreamError && err.kind === 'status' && (err.status === 404 || err.status === 429 || err.status >= 500);
+  if (!(err instanceof UpstreamError)) return false;
+  if (err.kind === 'timeout') return true; // a hung model: move on instead of waiting again
+  return err.kind === 'status' && (err.status === 404 || err.status === 429 || err.status >= 500);
 }
 
 const MODEL_NAME = /^[a-z0-9.-]{3,40}$/i;

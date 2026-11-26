@@ -135,7 +135,7 @@ test('generateAiPlan gives up with invalid_output after repeated bad answers', a
   assert.equal(f.calls.length, 3);
 });
 
-test('generateAiPlan reports timeouts and retries them', async () => {
+test('generateAiPlan reports a timeout after trying every model once', async () => {
   const f = fakeFetch([['generateContent', timeoutError()]]);
   await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', attempts: 3, sleep: noSleep }), (e) => e.code === 'timeout');
   assert.equal(f.calls.length, 3);
@@ -225,10 +225,29 @@ test('GEMINI_THINKING_BUDGET is sent only when it is a plain integer', async () 
   }
 });
 
-test('by default the pipeline makes two attempts per model', async () => {
-  const f = fakeFetch([['generateContent', timeoutError()]]);
-  await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', sleep: noSleep }), (e) => e.code === 'timeout');
-  assert.equal(f.calls.length, 2);
+test('a hung model times out once and the next model answers', async () => {
+  const tried = [];
+  const fetchImpl = async (url) => {
+    tried.push(url.match(/models\/([^:]+):/)[1]);
+    if (tried.length === 1) throw timeoutError();
+    return geminiReply();
+  };
+  const result = await generateAiPlan({ fetchImpl, env, facts, notes: '', sleep: noSleep });
+  assert.deepEqual(tried, ['gemini-3.8-flash', 'gemini-flash-latest']);
+  assert.equal(result.model, 'gemini-flash-latest');
+});
+
+test('the total time budget stops the pipeline before any request when it is spent', async () => {
+  const f = fakeFetch([['generateContent', geminiReply()]]);
+  await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', sleep: noSleep, budgetMs: 0 }), (e) => e.code === 'timeout');
+  assert.equal(f.calls.length, 0);
+});
+
+test('each attempt is capped by the remaining budget', async () => {
+  const seen = [];
+  const fetchImpl = async (url, init) => { seen.push(init.signal); return geminiReply(); };
+  await generateAiPlan({ fetchImpl, env, facts, notes: '', sleep: noSleep, budgetMs: 5000 });
+  assert.equal(seen.length, 1);
 });
 
 test('a 503 on the chosen model is retried, then the next model answers', async () => {
