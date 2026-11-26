@@ -51,7 +51,7 @@ Choices worth knowing:
 
 - **Validate at every boundary.** The same validators run in the browser and on the server. Unknown keys are dropped, enums and ranges are enforced.
 - **Security.** Strict CSP (no inline code), `nosniff`, frame denial, no-referrer. Path traversal is blocked and only known file types are served. JSON bodies are capped at 8 KB. Per-IP rate limits. Upstream calls use timeouts. The API key lives only in an env var and goes in a request header, never a URL. The UI builds DOM with `textContent`, never `innerHTML`.
-- **Efficiency.** No framework, no build step, about 25 KB of JS and CSS. Air results are cached for 10 minutes in a bounded cache. Static files are cacheable. One upstream call gives the current reading and the 24 h forecast.
+- **Efficiency.** No framework, no build step, under 65 KB of source in total. Air results are cached for 10 minutes in a bounded cache. Static files are cacheable. One upstream call gives the current reading and the 24 h forecast.
 - **Accessibility.** Semantic landmarks, a skip link, labelled fields, grouped fieldsets, inline errors with `role="alert"`, a live status region, focus moved to the results, 48 px touch targets, visible focus rings, colour is never the only signal (labels and numbers are always shown), a text table behind the forecast chart, reduced-motion and forced-colors support.
 - **Graceful failure.** If the data service is down the user can type an AQI and still get a full plan.
 
