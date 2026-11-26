@@ -5,12 +5,12 @@ import { UpstreamError, fetchJson } from './upstream.js';
 import { withRetry } from './retry.js';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-export const DEFAULT_MODEL = 'gemini-3.8-flash';
+export const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 /** Tried in order when the chosen model times out, or answers 404 (retired), 429 (quota) or 5xx (overloaded) after its own retries. */
-export const FALLBACK_MODELS = Object.freeze(['gemini-3.5-flash-lite', 'gemini-flash-latest']);
-export const AI_TIMEOUT_MS = 15_000
-/** Hard cap for the whole Gemini step across every model, so the page never waits much past a minute. */
-export const AI_BUDGET_MS = 55_000;
+export const FALLBACK_MODELS = Object.freeze(['gemini-3.8-flash', 'gemini-flash-latest']);
+export const AI_TIMEOUT_MS = 30_000;
+/** Hard cap for the whole Gemini step across every model, so the page never waits much past a minute and a half. */
+export const AI_BUDGET_MS = 85_000;
 export const AI_ATTEMPTS = 2;
 
 export const STEP_WHEN = Object.freeze(['morning', 'daytime', 'evening', 'anytime']);
@@ -202,18 +202,22 @@ export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, rand
   const primary = env.GEMINI_MODEL || DEFAULT_MODEL;
   if (!MODEL_NAME.test(primary)) throw new AiError('api_error', 'invalid model name');
   const { system, user } = buildPrompt(facts, notes);
-  const body = JSON.stringify({
-    systemInstruction: { parts: [{ text: system }] },
-    contents: [{ role: 'user', parts: [{ text: user }] }],
-    generationConfig: {
-      temperature: 0.3,
-      maxOutputTokens: 4096,
-      responseMimeType: 'application/json',
-      responseSchema: RESPONSE_SCHEMA,
-      ...thinkingConfig(env),
-    },
+  const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY };
+  // Schema mode asks Gemini to enforce the schema. JSON-only mode describes it in the prompt and we validate the result ourselves.
+  const initFor = (useSchema) => ({
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: useSchema ? system : `${system}\nReply with JSON only, matching this schema: ${JSON.stringify(RESPONSE_SCHEMA)}` }] },
+      contents: [{ role: 'user', parts: [{ text: user }] }],
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 4096,
+        responseMimeType: 'application/json',
+        ...(useSchema ? { responseSchema: RESPONSE_SCHEMA } : {}),
+      },
+    }),
   });
-  const init = { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY }, body };
 
   const deadline = Date.now() + budgetMs;
   const models = [primary, ...FALLBACK_MODELS.filter((m) => m !== primary)];
@@ -228,7 +232,19 @@ export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, rand
   }
   throw toAiError(lastError);
 
+  /** Schema mode first. If Google rejects it (400) or is overloaded (5xx), fall back to JSON-only mode on the same model. */
   async function callModel(model) {
+    try {
+      return await callMode(model, true);
+    } catch (err) {
+      const schemaRefused = err instanceof UpstreamError && err.kind === 'status' && (err.status === 400 || err.status >= 500);
+      if (!schemaRefused) throw err;
+      return callMode(model, false);
+    }
+  }
+
+  async function callMode(model, useSchema) {
+    const init = initFor(useSchema);
     const plan = await withRetry(
       async () => {
         const remaining = deadline - Date.now();
@@ -247,16 +263,6 @@ export async function generateAiPlan({ fetchImpl, env, facts, notes, sleep, rand
     );
     return { ...plan, model };
   }
-}
-
-/**
- * Optional GEMINI_THINKING_BUDGET (integer, 0 to 24576) caps the model's hidden reasoning tokens,
- * which is the usual cause of slow replies on "thinking" models. Omitted unless set.
- */
-function thinkingConfig(env) {
-  const raw = env.GEMINI_THINKING_BUDGET;
-  if (raw === undefined || raw === '' || !/^\d{1,5}$/.test(raw)) return {};
-  return { thinkingConfig: { thinkingBudget: Number(raw) } };
 }
 
 function shouldTryNextModel(err) {

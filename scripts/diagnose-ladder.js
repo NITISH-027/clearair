@@ -1,4 +1,4 @@
-// `npm run diagnose:ladder` sends five increasingly complex requests so you can see which one hangs or fails.
+// `npm run diagnose:ladder` sends three increasingly complex requests so you can see which one hangs or fails.
 // Prints status, elapsed time, finish reason and token counts. The key is never printed.
 import { DEFAULT_MODEL, RESPONSE_SCHEMA } from '../server/ai-plan.js';
 
@@ -12,14 +12,11 @@ const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURI
 const prompt = { role: 'user', parts: [{ text: 'List three short tips for breathing cleaner air at home.' }] };
 const json = { responseMimeType: 'application/json' };
 const schema = { ...json, responseSchema: RESPONSE_SCHEMA };
-const noThinking = { thinkingConfig: { thinkingBudget: 0 } };
 
 const steps = [
   ['A plain prompt', { contents: [prompt] }],
-  ['B plain prompt, thinking budget 0', { contents: [prompt], generationConfig: noThinking }],
-  ['C JSON mime type only', { contents: [prompt], generationConfig: json }],
-  ['D JSON with responseSchema', { contents: [prompt], generationConfig: schema }],
-  ['E responseSchema, thinking budget 0', { contents: [prompt], generationConfig: { ...schema, ...noThinking } }],
+  ['B JSON mime type only', { contents: [prompt], generationConfig: json }],
+  ['C JSON with responseSchema', { contents: [prompt], generationConfig: schema }],
 ];
 
 console.log(`Model: ${model}`);

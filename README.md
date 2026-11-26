@@ -30,14 +30,14 @@ flowchart LR
 | Code quality | Small single-purpose ES modules (`server/`, `shared/`, `public/js/`), no runtime dependencies, pure planning and model code separated from I/O, JSDoc and cited formulas, ESLint with strict rules |
 | Security | Strict CSP, CORS allowlist, per-route input validation and body cap, rate limits (plan 20/min, Gemini 8/min per client), prompt-injection defense, key only in env and header, `.env.example`, `.gitignore`, ESLint security plugin and Semgrep clean, `npm audit` 0 |
 | Efficiency | 15 min TTL caches with in-flight de-duplication for AQI fetches and identical Gemini requests, preloaded static files, no runtime dependencies, repo well under 1 MB |
-| Testing | 116 tests (unit and HTTP integration) using the Node test runner, coverage gate in CI |
+| Testing | 117 tests (unit and HTTP integration) using the Node test runner, coverage gate in CI |
 | Accessibility | Semantic landmarks, labelled fields, visible focus, contrast checked, live region for results, reduced-motion support, works without a mouse |
 
 ## Gemini pipeline (`server/ai-plan.js`)
 
-- Request: REST `generateContent` with `responseMimeType: application/json` and a `responseSchema`. The key is sent in the `x-goog-api-key` header, never in a URL or log. Model defaults to `gemini-3.8-flash` (the model Google's API named when it retired `gemini-2.5-flash` for new users); set `GEMINI_MODEL` to change it. If the chosen model answers HTTP 404, 429 or 5xx (after its own retry with backoff) or a timeout, the pipeline tries `gemini-3.5-flash-lite` then `gemini-flash-latest` (`gemini-2.5-flash` and `gemini-2.5-flash-lite` are closed to new users) before falling back to the rule-based plan. Auth and bad-request errors (400, 401, 403) do not switch models (a timeout does: a hung model is skipped without a second wait). If replies are slow or time out on a thinking model, set `GEMINI_THINKING_BUDGET` (for example `0` or `1024`) to cap hidden reasoning tokens; it is only sent when set.
+- Request: REST `generateContent` with `responseMimeType: application/json` and a `responseSchema`. The key is sent in the `x-goog-api-key` header, never in a URL or log. Model defaults to `gemini-3.5-flash-lite`; set `GEMINI_MODEL` to change it (`gemini-2.5-flash` and `gemini-2.5-flash-lite` are closed to new users). Schema mode comes first. If Google rejects the schema request (400) or is overloaded (5xx) after one retry, the same model is asked in JSON-only mode (schema described in the prompt) and the reply is validated by our own strict validator. If the model times out, answers 404, 429 or 5xx in both modes, the pipeline tries `gemini-3.8-flash` then `gemini-flash-latest` before falling back to the rule-based plan. Auth and bad-request errors (400, 401, 403) do not switch models (a timeout does: a hung model is skipped without a second wait).
 - Output is parsed and **strictly validated** (types, lengths, step count). Recoverable malformed output (code fences, trailing text) is repaired once; anything else is rejected.
-- Reliability: per-attempt timeout (15 s), a 55 s budget across all models, one retry per model on 429/5xx/network errors with exponential backoff and jitter; a timeout moves straight to the next model.
+- Reliability: per-attempt timeout (30 s), an 85 s budget across all models, one retry per model on 429/5xx/network errors with exponential backoff and jitter; a timeout moves straight to the next model.
 - Fallback: only if the key is missing, the user did not opt in, the rate limit is hit, or the call fails (`timeout`, `api_error`, `invalid_output`, `rate_limited`, `no_api_key`). The response carries `ai.source` (`gemini`, `fallback`, `off`) and a human label, and the UI shows a banner saying which plan you are reading.
 - Prompt-injection defense: the model only receives validated facts (AQI, ticked groups, catalogue step titles). City is reduced to a letters-only label. Free-text notes (200 chars max) are normalised, scanned with a word-window detector (no backtracking regex), dropped completely if they look like instructions, and otherwise placed between delimiters in a data-only section the system prompt tells the model to treat as untrusted. Model text is cleaned of markup before display and rendered with `textContent`.
 
@@ -80,7 +80,7 @@ GEMINI_API_KEY=... npm start   # http://localhost:8080 ; omit the key to see the
 npm run check        # lint + tests with coverage gate
 ```
 
-If the page shows the rule-based fallback while AI is ticked, the banner and the server log print the reason and Google's error. Run `npm run diagnose` (with `GEMINI_API_KEY` set) to see the raw failure, or `npm run diagnose:ladder` to send five requests of rising complexity (plain, thinking off, JSON mode, schema, schema with thinking off) and see which one is slow; set `GEMINI_MODEL` if the model name is rejected.
+If the page shows the rule-based fallback while AI is ticked, the banner and the server log print the reason and Google's error. Run `npm run diagnose` (with `GEMINI_API_KEY` set) to see the raw failure, or `npm run diagnose:ladder` to send three requests of rising complexity (plain, JSON mode, schema) and see which one is slow; set `GEMINI_MODEL` if the model name is rejected.
 
 Get a free Gemini key at https://aistudio.google.com/apikey. Node 20 or newer.
 
@@ -103,7 +103,7 @@ Deploy the Dockerfile on Render or Cloud Run, set `GEMINI_API_KEY` and `TRUST_PR
 npm run lint            # ESLint, strict rules + eslint-plugin-security: 0 errors, 0 warnings
 semgrep --config p/javascript --metrics off .   # 0 findings (68 rules)
 npm audit               # 0 vulnerabilities
-npm run test:coverage   # 116 tests; 100% lines, 97% branches, 99% functions
+npm run test:coverage   # 117 tests; 100% lines, 97% branches, 99% functions
 ```
 
 CI (`.github/workflows/ci.yml`) runs lint, `npm audit`, Semgrep, tests with coverage thresholds, and a Docker build.

@@ -153,7 +153,7 @@ test('with a key, Gemini output is validated and returned with its model name', 
   await withServer({ fetchImpl: f, env: aiEnv }, async (base) => {
     const body = await (await postPlan(base, { city: 'Chennai', profile: profileBody(), notes: 'I walk my dog at 6 AM' })).json();
     assert.equal(body.ai.source, 'gemini');
-    assert.equal(body.ai.model, 'gemini-3.8-flash');
+    assert.equal(body.ai.model, 'gemini-3.5-flash-lite');
     assert.equal(body.ai.steps.length, goodAiPlan.steps.length);
     const prompt = JSON.parse(f.callsTo('generateContent')[0].init.body).contents[0].parts[0].text;
     assert.match(prompt, /<user_notes>\nI walk my dog at 6 AM\n<\/user_notes>/);

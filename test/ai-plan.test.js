@@ -94,9 +94,9 @@ test('generateAiPlan parses a live-schema Gemini response and sends the structur
   const f = fakeFetch([['generateContent', geminiReply()]]);
   const result = await generateAiPlan({ fetchImpl: f, env, facts, notes: 'walk the dog', sleep: noSleep });
   assert.equal(result.steps.length, 3);
-  assert.equal(result.model, 'gemini-3.8-flash');
+  assert.equal(result.model, 'gemini-3.5-flash-lite');
   const call = f.calls[0];
-  assert.match(call.url, /models\/gemini-3\.8-flash:generateContent$/);
+  assert.match(call.url, /models\/gemini-3\.5-flash-lite:generateContent$/);
   assert.ok(!call.url.includes('test-key'), 'key must stay out of the URL');
   assert.equal(call.init.headers['x-goog-api-key'], 'test-key-123');
   const body = JSON.parse(call.init.body);
@@ -142,7 +142,7 @@ test('generateAiPlan reports a timeout after trying every model once', async () 
 });
 
 test('generateAiPlan does not retry auth or bad-request errors', async () => {
-  for (const status of [400, 401, 403]) {
+  for (const status of [401, 403]) {
     const f = fakeFetch([['generateContent', json({}, false, status)]]);
     await assert.rejects(generateAiPlan({ fetchImpl: f, env, facts, notes: '', sleep: noSleep }), (e) => e.code === 'api_error');
     assert.equal(f.calls.length, 1, `status ${status}`);
@@ -197,7 +197,7 @@ test('a 404 on the chosen model tries the fallback models in order', async () =>
     return geminiReply();
   };
   const result = await generateAiPlan({ fetchImpl, env: { GEMINI_API_KEY: 'k' }, facts: {}, notes: '', sleep: async () => {} });
-  assert.deepEqual(tried, ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest']);
+  assert.deepEqual(tried, ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest']);
   assert.equal(result.model, 'gemini-flash-latest');
 });
 
@@ -216,14 +216,6 @@ test('a non-404 error does not move on to another model', async () => {
   assert.equal(calls, 1);
 });
 
-test('GEMINI_THINKING_BUDGET is sent only when it is a plain integer', async () => {
-  for (const [value, expected] of [['0', 0], ['1024', 1024], ['abc', undefined], ['', undefined]]) {
-    const f = fakeFetch([['generateContent', geminiReply()]]);
-    await generateAiPlan({ fetchImpl: f, env: { ...env, GEMINI_THINKING_BUDGET: value }, facts, notes: '', sleep: noSleep });
-    const cfg = JSON.parse(f.calls[0].init.body).generationConfig;
-    assert.equal(cfg.thinkingConfig?.thinkingBudget, expected, value);
-  }
-});
 
 test('a hung model times out once and the next model answers', async () => {
   const tried = [];
@@ -233,8 +225,8 @@ test('a hung model times out once and the next model answers', async () => {
     return geminiReply();
   };
   const result = await generateAiPlan({ fetchImpl, env, facts, notes: '', sleep: noSleep });
-  assert.deepEqual(tried, ['gemini-3.8-flash', 'gemini-3.5-flash-lite']);
-  assert.equal(result.model, 'gemini-3.5-flash-lite');
+  assert.deepEqual(tried, ['gemini-3.5-flash-lite', 'gemini-3.8-flash']);
+  assert.equal(result.model, 'gemini-3.8-flash');
 });
 
 test('the total time budget stops the pipeline before any request when it is spent', async () => {
@@ -250,17 +242,40 @@ test('each attempt is capped by the remaining budget', async () => {
   assert.equal(seen.length, 1);
 });
 
-test('a 503 on the chosen model is retried, then the next model answers', async () => {
+test('when the schema request keeps returning 503, the same model is asked in JSON-only mode', async () => {
+  const bodies = [];
+  const fetchImpl = async (url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return bodies.length <= 2 ? json({}, false, 503) : geminiReply();
+  };
+  const result = await generateAiPlan({ fetchImpl, env, facts, notes: '', sleep: noSleep });
+  assert.equal(result.model, 'gemini-3.5-flash-lite');
+  assert.equal(bodies.length, 3);
+  assert.ok(bodies[0].generationConfig.responseSchema);
+  assert.ok(bodies[1].generationConfig.responseSchema);
+  assert.equal(bodies[2].generationConfig.responseSchema, undefined);
+  assert.match(bodies[2].systemInstruction.parts[0].text, /JSON only, matching this schema/);
+});
+
+test('a 400 on the schema request degrades to JSON-only mode and the reply is still validated', async () => {
+  const bodies = [];
+  const fetchImpl = async (url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return bodies.length === 1 ? json({ error: { message: 'bad schema' } }, false, 400) : geminiReply('{"summary":"short"}');
+  };
+  await assert.rejects(generateAiPlan({ fetchImpl, env, facts, notes: '', sleep: noSleep }), (e) => e.code === 'invalid_output');
+  assert.equal(bodies[1].generationConfig.responseSchema, undefined);
+});
+
+test('503 in both modes moves on to the next model', async () => {
   const tried = [];
-  const delays = [];
   const fetchImpl = async (url) => {
     tried.push(url.match(/models\/([^:]+):/)[1]);
-    return tried.length <= 2 ? json({}, false, 503) : geminiReply();
+    return tried.length <= 4 ? json({}, false, 503) : geminiReply();
   };
-  const result = await generateAiPlan({ fetchImpl, env, facts, notes: '', sleep: async (ms) => { delays.push(ms); } });
-  assert.deepEqual(tried, ['gemini-3.8-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite']);
-  assert.equal(delays.length, 1);
-  assert.equal(result.model, 'gemini-3.5-flash-lite');
+  const result = await generateAiPlan({ fetchImpl, env, facts, notes: '', sleep: noSleep });
+  assert.equal(tried.length, 5);
+  assert.equal(result.model, 'gemini-3.8-flash');
 });
 
 test('a 429 on every model ends as api_error', async () => {
